@@ -1,0 +1,8 @@
+torch>=1.10.0
+torchaudio>=0.10.0
+numpy>=1.19.0
+matplotlib>=3.3.0
+pesq>=0.0.3
+pystoi>=0.3.3
+tqdm>=4.45.0
+scipy>=1.5.0 

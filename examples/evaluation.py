@@ -4,12 +4,18 @@ import torch.optim as optim
 import torchaudio
 import numpy as np
 import os
+import sys
 from torch.utils.data import Dataset, DataLoader
-from wav2tensor_core import Wav2TensorCore
 import matplotlib.pyplot as plt
 import pesq
 import torchaudio.transforms as T
 from tqdm import tqdm
+
+# Add parent directory to path to import wav2tensor
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+from wav2tensor import Wav2TensorCore
 
 # 1. Create Synthetic Dataset of Clean and Degraded Audio Pairs
 

@@ -199,22 +199,4 @@ class Wav2TensorCore(nn.Module):
             'psychoacoustic': psychoacoustic_plane # Masking threshold
         }
         
-        return tensor, planes
-
-# Example usage
-if __name__ == "__main__":
-    # Create a random waveform (stereo)
-    waveform = torch.randn(2, 2, 16000)  # (batch_size, channels, samples)
-    
-    # Initialize Wav2Tensor
-    wav2tensor = Wav2TensorCore(sample_rate=16000, n_fft=1024, hop_length=256)
-    
-    # Transform waveform to tensor
-    tensor, planes = wav2tensor(waveform)
-    
-    # Print shapes
-    print(f"Input waveform shape: {waveform.shape}")
-    print(f"Output tensor shape: {tensor.shape}")
-    print("Individual planes:")
-    for name, plane in planes.items():
-        print(f"  {name}: {plane.shape}") 
+        return tensor, planes 
