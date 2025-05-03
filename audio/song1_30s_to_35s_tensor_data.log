@@ -1,0 +1,73 @@
+# Wav2Tensor Harmonic Plane Data
+# Generated: 2025-05-03 17:15:06
+
+## General Statistics
+Harmonic Plane Shape: (513, 862)
+Min: 0.000000
+Max: 1847393.750000
+Mean: 309.996582
+Median: 0.061217
+Standard Deviation: 9609.586914
+
+## Percentiles
+1%: 0.000005
+5%: 0.000016
+25%: 0.000126
+50%: 0.061217
+75%: 0.489940
+95%: 11.911028
+99%: 1607.353271
+
+## Harmonic Peaks
+Global Maximum: 1847393.750000 at 129.20 Hz, 0.99 s
+
+## Frequency Band Analysis
+### Sub Bass (20-100 Hz)
+Mean: 19468.753906
+Max: 626790.125000
+Max Location: 43.07 Hz at 1.03 s
+
+### Bass (100-250 Hz)
+Mean: 23736.605469
+Max: 1847393.750000
+Max Location: 129.20 Hz at 0.99 s
+
+### Low Mids (250-500 Hz)
+Mean: 5278.980957
+Max: 193405.265625
+Max Location: 387.60 Hz at 0.41 s
+
+### Mids (500-2000 Hz)
+Mean: 59.140728
+Max: 25925.083984
+Max Location: 559.86 Hz at 2.21 s
+
+### Upper Mids (2000-5000 Hz)
+Mean: 3.674891
+Max: 415.916718
+Max Location: 3100.78 Hz at 0.42 s
+
+### Highs (5000-10000 Hz)
+Mean: 1.196755
+Max: 165.789032
+Max Location: 5383.30 Hz at 2.79 s
+
+## Sample Points (Frequency, Time, Value)
+43.07 Hz, 0.00 s: 5991.061035
+43.07 Hz, 2.50 s: 43972.285156
+43.07 Hz, 5.00 s: 668.907227
+86.13 Hz, 0.00 s: 7709.235840
+86.13 Hz, 2.50 s: 26524.898438
+86.13 Hz, 5.00 s: 931.570740
+258.40 Hz, 0.00 s: 8078.325195
+258.40 Hz, 2.50 s: 5253.059082
+258.40 Hz, 5.00 s: 515.680176
+516.80 Hz, 0.00 s: 317.958466
+516.80 Hz, 2.50 s: 946.934326
+516.80 Hz, 5.00 s: 165.174118
+732.13 Hz, 0.00 s: 66.162956
+732.13 Hz, 2.50 s: 10.758453
+732.13 Hz, 5.00 s: 7.703767
+990.53 Hz, 0.00 s: 5.706423
+990.53 Hz, 2.50 s: 1.499529
+990.53 Hz, 5.00 s: 4.744711

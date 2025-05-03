@@ -12,7 +12,7 @@ Wav2Tensor addresses limitations in traditional audio representations:
 Our implementation creates a structured tensor T ∈ ℂ^(F×T'×D) with four interpretable planes:
 
 1. **Spectral Plane (d=1)**: Combines magnitude and phase via the STFT
-2. **Harmonic Plane (d=2)**: Captures pitch and overtones using Harmonic Product Spectrum (HPS)
+2. **Harmonic Plane (d=2)**: Captures pitch and overtones using either Harmonic Product Spectrum (HPS) or learned harmonic filterbanks
 3. **Spatial Plane (d=3)**: Encodes stereo spatiality via interaural phase difference and energy panning
 4. **Psychoacoustic Plane (d=4)**: Estimates perceptual masking thresholds
 
@@ -41,8 +41,16 @@ from wav2tensor import Wav2TensorCore
 # Create an audio tensor (batch_size, channels, time_samples)
 waveform = torch.randn(1, 2, 22050)  # 1 second of stereo audio at 22.05kHz
 
-# Initialize Wav2Tensor encoder
+# Initialize Wav2Tensor encoder with default HPS harmonic method
 wav2tensor = Wav2TensorCore(sample_rate=22050, n_fft=1024, hop_length=256)
+
+# Or use the learned harmonic filterbanks approach
+wav2tensor_filterbank = Wav2TensorCore(
+    sample_rate=22050, 
+    n_fft=1024, 
+    hop_length=256, 
+    harmonic_method='filterbank'
+)
 
 # Convert to Wav2Tensor representation
 tensor, planes = wav2tensor(waveform)
@@ -87,7 +95,9 @@ This script:
 Wav2Tensor consists of four primary components:
 
 1. **Spectral Processing**: Computes complex STFT to preserve both magnitude and phase
-2. **Harmonic Analysis**: Implements Harmonic Product Spectrum to enhance pitch structure
+2. **Harmonic Analysis**: Implements either:
+   - **Harmonic Product Spectrum (HPS)**: Traditional approach that enhances pitch structure through harmonic multiplication
+   - **Learned Harmonic Filterbanks**: Trainable CNN approach for adaptive harmonic detection
 3. **Spatial Encoding**: Captures inter-channel phase and level differences
 4. **Psychoacoustic Modeling**: Estimates masking thresholds based on perceptual principles
 
@@ -95,11 +105,24 @@ Wav2Tensor consists of four primary components:
 
 ### Harmonic Plane
 
-The harmonic plane implementation uses a log-domain approach to avoid numerical underflow issues:
-- Traditional HPS directly multiplies spectral magnitudes at harmonic frequencies, which can lead to vanishing values
+The harmonic plane has two implementation options:
+
+#### 1. Harmonic Product Spectrum (HPS)
+- Traditional HPS directly multiplies spectral magnitudes at harmonic frequencies
 - Our implementation performs multiplication in the log-domain (using addition of logarithms), improving numerical stability
 - This approach provides more robust detection of harmonic content across different types of audio material
 - We use `torch.log1p` and `torch.expm1` for improved stability with small values
+- K=3 harmonics are used (reduced from original K=5) to focus on stronger harmonics
+- Nearest-neighbor interpolation preserves peak values during frequency scaling
+
+#### 2. Learned Harmonic Filterbanks
+- Replaces HPS with 1D convolutions to learn task-specific harmonic patterns
+- Advantages:
+  - Adaptive to data characteristics
+  - Produces stable gradients during training
+  - Can learn more complex harmonic relationships
+- Implementation uses a sequence of 2D convolutional layers operating on the frequency dimension
+- Initialized to approximate HPS behavior but can adapt during training
 
 ### Psychoacoustic Plane
 

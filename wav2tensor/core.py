@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torchaudio
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Literal, List, Optional, Union
 
 class Wav2TensorCore(nn.Module):
     """
@@ -19,11 +19,46 @@ class Wav2TensorCore(nn.Module):
     3. Spatial plane (d=3): T_spat(f,t) = { IPD(y_L, y_R)_{f,t}, (|y_L|^2 - |y_R|^2)/(|y_L|^2 + |y_R|^2) }
     4. Psychoacoustic plane (d=4): T_psy(f,t) = M(y)_{f,t}
     """
-    def __init__(self, sample_rate=22050, n_fft=1024, hop_length=256):
+    def __init__(
+        self, 
+        sample_rate=22050, 
+        n_fft=1024, 
+        hop_length=256, 
+        harmonic_method='hps',
+        include_planes: Optional[List[str]] = None
+    ):
+        """
+        Initialize the Wav2Tensor encoder.
+        
+        Args:
+            sample_rate: Audio sample rate (default: 22050Hz)
+            n_fft: FFT size for STFT (default: 1024)
+            hop_length: Hop length for STFT (default: 256)
+            harmonic_method: Method for harmonic plane calculation
+                             'hps': Harmonic Product Spectrum (original method)
+                             'filterbank': Learned harmonic filterbanks
+            include_planes: List of planes to include in the output tensor
+                            Options: ['spectral', 'harmonic', 'spatial', 'psychoacoustic']
+                            Default: All planes are included
+        """
         super().__init__()
         self.sample_rate = sample_rate
         self.n_fft = n_fft
         self.hop_length = hop_length
+        self.harmonic_method = harmonic_method
+        
+        # Default to including all planes if not specified
+        self.include_planes = include_planes or ['spectral', 'harmonic', 'spatial', 'psychoacoustic']
+        
+        # Validate plane selection
+        for plane in self.include_planes:
+            if plane not in ['spectral', 'harmonic', 'spatial', 'psychoacoustic']:
+                raise ValueError(f"Invalid plane name: {plane}. Must be one of: 'spectral', 'harmonic', 'spatial', 'psychoacoustic'")
+        
+        # Always include spectral plane as it's fundamental
+        if 'spectral' not in self.include_planes:
+            self.include_planes.append('spectral')
+            print("Warning: Spectral plane is mandatory and has been added to include_planes.")
         
         # STFT transform
         self.stft = torchaudio.transforms.Spectrogram(
@@ -36,12 +71,51 @@ class Wav2TensorCore(nn.Module):
         # Harmonic Product Spectrum parameters
         self.K = 3  # Reduced from 5 to 3 to focus on the strongest harmonics
         
+        # Learned harmonic filterbanks (if selected)
+        if harmonic_method == 'filterbank' and 'harmonic' in self.include_planes:
+            # The filterbank operates on the frequency dimension
+            # For a typical input shape of [B, F, T] or [B, 1, F, T]
+            n_freq_bins = n_fft // 2 + 1
+            self.harmonic_filterbank = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=(5, 1), stride=1, padding=(2, 0)),  # Learn harmonic bands
+                nn.ReLU(),
+                nn.Conv2d(32, 16, kernel_size=(5, 1), stride=1, padding=(2, 0)),  # Mid-level harmonic features
+                nn.ReLU(),
+                nn.Conv2d(16, 1, kernel_size=(3, 1), stride=1, padding=(1, 0))    # Compress to harmonic map
+            )
+            
+            # Initialize filterbank to approximate HPS behavior
+            self._init_harmonic_filterbank()
+        
         # Critical band frequencies (Bark scale) for psychoacoustic masking
         self.critical_bands = torch.tensor([
             20, 100, 200, 300, 400, 510, 630, 770, 920, 1080, 1270, 1480, 1720, 2000,
             2320, 2700, 3150, 3700, 4400, 5300, 6400, 7700, 9500, 12000, 15500
         ])
-
+    
+    def _init_harmonic_filterbank(self):
+        """Initialize the harmonic filterbank to approximate HPS behavior."""
+        # Access the first layer of the harmonic filterbank
+        first_layer = self.harmonic_filterbank[0]
+        with torch.no_grad():
+            # Initialize some filters to detect harmonic patterns
+            # Create filters that look for energy at frequency f and its harmonics f/2, f/3
+            kernel_size = first_layer.kernel_size[0]
+            mid_point = kernel_size // 2
+            
+            # Simple initialization for a few filters (others will be randomly initialized)
+            for i in range(min(8, first_layer.out_channels)):
+                # Create a filter that looks for the ith harmonic relationship
+                first_layer.weight[i, 0, :, 0] = 0
+                # Add some positive weight at the center and at harmonically related positions
+                first_layer.weight[i, 0, mid_point, 0] = 0.5  # f
+                
+                # For harmonics 2 through K
+                for k in range(2, self.K + 1):
+                    harmonic_offset = mid_point // k
+                    if harmonic_offset > 0:
+                        first_layer.weight[i, 0, mid_point - harmonic_offset, 0] = 0.3 / k
+    
     def _compute_spectral_plane(self, waveform: torch.Tensor) -> torch.Tensor:
         """
         Compute spectral plane T_spec(f,t) = STFT(y)_{f,t} ∈ ℂ
@@ -51,10 +125,16 @@ class Wav2TensorCore(nn.Module):
         # or [B, F, T] if input is [B, T]
         return self.stft(waveform)
     
-    def _compute_harmonic_plane(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
+    def _compute_harmonic_plane_hps(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
         """
-        Compute harmonic plane T_harm(f,t) = ∏_{k=1}^{K} |STFT(y)_{f/k,t}|
-        Implements Harmonic Product Spectrum (HPS)
+        Compute harmonic plane using Harmonic Product Spectrum (HPS)
+        T_harm(f,t) = ∏_{k=1}^{K} |STFT(y)_{f/k,t}|
+        
+        Args:
+            spec_magnitude: Magnitude spectrogram [B, F, T] or [B, C, F, T]
+            
+        Returns:
+            Harmonic plane tensor [B, 1, F, T]
         """
         # spec_magnitude shape could be [B, C, F, T] or [B, F, T]
         # Handle both cases
@@ -80,16 +160,14 @@ class Wav2TensorCore(nn.Module):
             downsampled = torch.nn.functional.interpolate(
                 spec_magnitude.unsqueeze(1), 
                 size=(F//k, T), 
-                mode='bilinear', 
-                align_corners=False
+                mode='nearest'  # Changed from 'bilinear' to 'nearest' to preserve peak values
             ).squeeze(1)
             
             # Upsample back to original size
             upsampled = torch.nn.functional.interpolate(
                 downsampled.unsqueeze(1), 
                 size=(F, T), 
-                mode='bilinear', 
-                align_corners=False
+                mode='nearest'  # Changed from 'bilinear' to 'nearest' to preserve peak values
             ).squeeze(1)
             
             # Add log instead of multiplying
@@ -99,6 +177,55 @@ class Wav2TensorCore(nn.Module):
         harmonic_product = torch.expm1(harmonic_sum)
         
         return harmonic_product.unsqueeze(1)  # Add channel dimension (B, 1, F, T)
+    
+    def _compute_harmonic_plane_filterbank(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
+        """
+        Compute harmonic plane using learned harmonic filterbanks
+        
+        Args:
+            spec_magnitude: Magnitude spectrogram [B, F, T] or [B, C, F, T]
+            
+        Returns:
+            Harmonic plane tensor [B, 1, F, T]
+        """
+        # spec_magnitude shape could be [B, C, F, T] or [B, F, T]
+        # Handle both cases
+        if len(spec_magnitude.shape) == 4:
+            B, C, F, T = spec_magnitude.shape
+            # Collapse channel dimension by taking average if it exists
+            if C > 1:
+                spec_magnitude = spec_magnitude.mean(dim=1)  # Now [B, F, T]
+            else:
+                spec_magnitude = spec_magnitude.squeeze(1)  # Now [B, F, T]
+        else:
+            # Already [B, F, T]
+            B, F, T = spec_magnitude.shape
+        
+        # Add channel dimension for the conv2d layers
+        x = spec_magnitude.unsqueeze(1)  # [B, 1, F, T]
+        
+        # Apply the harmonic filterbank
+        harmonic_output = self.harmonic_filterbank(x)  # [B, 1, F, T]
+        
+        # Apply ReLU to ensure non-negative outputs (like the HPS approach)
+        harmonic_output = torch.relu(harmonic_output)
+        
+        return harmonic_output
+    
+    def _compute_harmonic_plane(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
+        """
+        Compute harmonic plane using the selected method
+        
+        Args:
+            spec_magnitude: Magnitude spectrogram
+            
+        Returns:
+            Harmonic plane tensor [B, 1, F, T]
+        """
+        if self.harmonic_method == 'filterbank':
+            return self._compute_harmonic_plane_filterbank(spec_magnitude)
+        else:  # Default to 'hps'
+            return self._compute_harmonic_plane_hps(spec_magnitude)
     
     def _compute_spatial_plane(self, spec_left: torch.Tensor, spec_right: torch.Tensor) -> torch.Tensor:
         """
@@ -203,12 +330,16 @@ class Wav2TensorCore(nn.Module):
                       For stereo audio: (B, 2, T)
         
         Returns:
-            tensor: (B, D, F, T') structured tensor with D=4 planes
+            tensor: (B, D, F, T') structured tensor with selected planes
             planes: dictionary with individual planes for easier access
         """
         B, C, T = waveform.shape
         
-        # 1. Spectral Plane
+        # Initialize dictionary to store all computed planes
+        planes = {}
+        tensor_components = []
+        
+        # 1. Spectral Plane (always computed as it's needed for other planes)
         if C == 1:
             # For mono input
             spec = self._compute_spectral_plane(waveform)
@@ -221,27 +352,13 @@ class Wav2TensorCore(nn.Module):
             # Average for mono representation when needed
             spec = (spec_left + spec_right) / 2
         
+        # Store spectral plane
+        planes['spectral'] = spec
+        
         # Get magnitude for subsequent calculations
         spec_magnitude = torch.abs(spec)
         
-        # 2. Harmonic Plane
-        harmonic_plane = self._compute_harmonic_plane(spec_magnitude)
-        
-        # 3. Spatial Plane
-        if C > 1:  # Only compute spatial plane for stereo
-            spatial_plane = self._compute_spatial_plane(spec_left, spec_right)
-        else:  # For mono, use zeros
-            if len(spec.shape) == 4:
-                _, _, F, T = spec.shape
-            else:
-                _, F, T = spec.shape
-            spatial_plane = torch.zeros((B, 2, F, T), device=waveform.device)
-        
-        # 4. Psychoacoustic Plane
-        psychoacoustic_plane = self._compute_psychoacoustic_plane(spec_magnitude)
-        
-        # Ensure spectral components are properly dimensioned for concatenation
-        # spec is either [B, F, T] or [B, C, F, T]
+        # Prepare spectral components for tensor
         if len(spec.shape) == 3:
             # Add channel dimension
             spec_real = torch.real(spec).unsqueeze(1)
@@ -255,22 +372,43 @@ class Wav2TensorCore(nn.Module):
                 spec_real = spec_real.mean(dim=1, keepdim=True)
                 spec_imag = spec_imag.mean(dim=1, keepdim=True)
         
-        # Stack all planes to form the tensor
-        # All tensors should now have shape [B, C, F, T]
-        tensor = torch.cat([
-            spec_real,                # Real part of spectral plane (B, 1, F, T)
-            spec_imag,                # Imaginary part of spectral plane (B, 1, F, T)
-            harmonic_plane,           # Harmonic plane (B, 1, F, T)
-            spatial_plane,            # Spatial plane (B, 2, F, T)
-            psychoacoustic_plane      # Psychoacoustic plane (B, 1, F, T)
-        ], dim=1)
+        # Add spectral components to tensor
+        tensor_components.extend([spec_real, spec_imag])
         
-        # For easier access, also return individual planes
-        planes = {
-            'spectral': spec,                     # Complex spectrogram
-            'harmonic': harmonic_plane,           # Harmonic structure (B, 1, F, T)
-            'spatial': spatial_plane,             # Spatial cues (B, 2, F, T)
-            'psychoacoustic': psychoacoustic_plane # Masking threshold (B, 1, F, T)
-        }
+        # 2. Harmonic Plane (if included)
+        if 'harmonic' in self.include_planes:
+            harmonic_plane = self._compute_harmonic_plane(spec_magnitude)
+            planes['harmonic'] = harmonic_plane
+            tensor_components.append(harmonic_plane)
+        else:
+            # Add empty placeholder for consistent dictionary access
+            planes['harmonic'] = torch.zeros((B, 1, *spec_magnitude.shape[1:]), device=waveform.device)
+        
+        # 3. Spatial Plane (if included and input is stereo)
+        if 'spatial' in self.include_planes and C > 1:
+            spatial_plane = self._compute_spatial_plane(spec_left, spec_right)
+            planes['spatial'] = spatial_plane
+            tensor_components.append(spatial_plane)
+        else:
+            # Add empty placeholder with correct shape
+            if len(spec.shape) == 4:
+                _, _, F, T = spec.shape
+            else:
+                _, F, T = spec.shape
+            planes['spatial'] = torch.zeros((B, 2, F, T), device=waveform.device)
+            if 'spatial' in self.include_planes:
+                tensor_components.append(planes['spatial'])
+        
+        # 4. Psychoacoustic Plane (if included)
+        if 'psychoacoustic' in self.include_planes:
+            psychoacoustic_plane = self._compute_psychoacoustic_plane(spec_magnitude)
+            planes['psychoacoustic'] = psychoacoustic_plane
+            tensor_components.append(psychoacoustic_plane)
+        else:
+            # Add empty placeholder for consistent dictionary access
+            planes['psychoacoustic'] = torch.zeros((B, 1, *spec_magnitude.shape[1:]), device=waveform.device)
+        
+        # Stack all planes to form the tensor
+        tensor = torch.cat(tensor_components, dim=1)
         
         return tensor, planes 

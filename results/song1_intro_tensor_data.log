@@ -1,0 +1,65 @@
+# Wav2Tensor Data Analysis
+# Generated: 2025-05-03 17:48:36
+
+## Configuration
+Audio file: audio/song1.mp3
+Segment: 0.0s to 10.0s
+Harmonic method: hps
+Processing time: 0.10s
+
+## Tensor Shapes
+Spectral: (513, 862)
+Harmonic: (513, 862)
+Spatial: (2, 513, 862)
+Psychoacoustic: (513, 862)
+
+## Harmonic Plane Statistics
+Min: 0.000000
+Max: 1178839.000000
+Mean: 212.102661
+Median: 0.398492
+Standard Deviation: 8706.003906
+
+## Percentiles
+1%: 0.000000
+5%: 0.000489
+25%: 0.049291
+50%: 0.398492
+75%: 2.762247
+95%: 70.360695
+99%: 824.437500
+
+## Harmonic Peaks
+Global Maximum: 1178839.000000 at 64.60 Hz, 4.49 s
+
+## Frequency Band Analysis
+### Sub Bass (20-100 Hz)
+Mean: 14734.464844
+Max: 1178839.000000
+Max Location: 64.60 Hz at 4.49 s
+
+### Bass (100-250 Hz)
+Mean: 5837.129395
+Max: 889267.437500
+Max Location: 107.67 Hz at 2.28 s
+
+### Low Mids (250-500 Hz)
+Mean: 261.587280
+Max: 29132.695312
+Max Location: 323.00 Hz at 5.43 s
+
+### Mids (500-2000 Hz)
+Mean: 39.477375
+Max: 15958.548828
+Max Location: 667.53 Hz at 9.68 s
+
+### Upper Mids (2000-5000 Hz)
+Mean: 20.311783
+Max: 13428.549805
+Max Location: 2648.58 Hz at 6.47 s
+
+### Highs (5000-10000 Hz)
+Mean: 1.244354
+Max: 707.657043
+Max Location: 8419.48 Hz at 7.53 s
+
