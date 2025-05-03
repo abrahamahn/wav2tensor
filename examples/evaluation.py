@@ -21,7 +21,7 @@ from wav2tensor import Wav2TensorCore
 
 class SyntheticAudioDataset(Dataset):
     """Dataset of synthetic clean + degraded audio pairs."""
-    def __init__(self, num_samples=1000, sample_rate=16000, duration=1.0, 
+    def __init__(self, num_samples=1000, sample_rate=22050, duration=1.0, 
                  snr_range=(5, 25), clip_range=(0.3, 0.9)):
         """
         Args:
@@ -245,7 +245,7 @@ class SpectrogramUNet(nn.Module):
 
 # 4. Evaluation metrics
 
-def calculate_pesq(clean, enhanced, sr=16000):
+def calculate_pesq(clean, enhanced, sr=22050):
     """Calculate PESQ score between clean and enhanced audio."""
     try:
         # Convert to numpy arrays
@@ -263,7 +263,7 @@ def calculate_pesq(clean, enhanced, sr=16000):
         print(f"Error calculating PESQ: {e}")
         return 0.0
 
-def calculate_stoi(clean, enhanced, sr=16000):
+def calculate_stoi(clean, enhanced, sr=22050):
     """Calculate STOI score between clean and enhanced audio."""
     try:
         # Convert to numpy arrays

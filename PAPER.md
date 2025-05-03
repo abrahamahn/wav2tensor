@@ -1,4 +1,3 @@
-
 # Wav2Tensor: Structured Multi-Plane Audio Representation for Enhanced Generative Modeling  
 **Abraham Joongwhan Ahn**  
 Yonsei University, Seoul, South Korea  
@@ -46,6 +45,9 @@ $$T_{spec}(f,t) = \text{STFT}(y)_{f,t} \in \mathbb{C}$$
 Captures pitch and overtones using Harmonic Product Spectrum (HPS):  
 $$T_{harm}(f,t) = \prod_{k=1}^{K} |\text{STFT}(y)_{f/k,t}|$$
 
+> *Implementation Note*: For numerical stability, the actual implementation computes this in the log-domain:  
+> $$T_{harm}(f,t) = \exp\left(\sum_{k=1}^{K} \log(1 + |\text{STFT}(y)_{f/k,t}|)\right) - 1$$
+
 **3. Spatial Plane ($$d=3$$)**  
 Encodes stereo spatiality via interaural phase difference (IPD) and energy panning:  
 $$T_{spat}(f,t) = \left\{ \text{IPD}(y_L, y_R)_{f,t}, \frac{|y_L|^2 - |y_R|^2}{|y_L|^2 + |y_R|^2} \right\}$$
@@ -53,6 +55,10 @@ $$T_{spat}(f,t) = \left\{ \text{IPD}(y_L, y_R)_{f,t}, \frac{|y_L|^2 - |y_R|^2}{|
 **4. Psychoacoustic Plane ($$d=4$$)**  
 Estimates perceptual masking thresholds (MPEG-inspired):  
 $$T_{psy}(f,t) = M(y)_{f,t}$$
+
+> *Implementation Note*: Our implementation models frequency-dependent masking thresholds using Bark scale conversion and asymmetric spreading functions:  
+> $$T_{psy}(f,t) = \max(0, M_{spread}(y)_{f,t} - \tau)$$  
+> where $$M_{spread}$$ applies a psychoacoustic spreading function and $$\tau$$ represents a masking threshold offset.
 
 ### 2.2 Computational Efficiency  
 Wav2Tensor reduces model complexity by providing structured priors, avoiding redundant feature rediscovery:  

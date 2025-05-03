@@ -20,29 +20,61 @@ sys.path.append(parent_dir)
 
 from wav2tensor import Wav2TensorCore
 
-def plot_tensor_planes(planes, title="Wav2Tensor Representation"):
+def plot_tensor_planes(planes, title="Wav2Tensor Representation", sample_rate=22050, n_fft=1024):
     """Plot the different planes of the Wav2Tensor representation."""
     fig, axs = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle(title, fontsize=16)
     
+    # Calculate frequency axis in Hz
+    freqs = np.linspace(0, sample_rate/2, n_fft//2 + 1)
+    
     # Plot spectral magnitude
     spec_mag = torch.abs(planes['spectral']).squeeze().cpu().numpy()
-    axs[0, 0].imshow(10 * np.log10(spec_mag + 1e-8), aspect='auto', origin='lower')
+    im1 = axs[0, 0].imshow(
+        10 * np.log10(spec_mag + 1e-8), 
+        aspect='auto', 
+        origin='lower',
+        extent=[0, spec_mag.shape[1], 0, sample_rate/2]
+    )
     axs[0, 0].set_title("Spectral Magnitude (dB)")
-    axs[0, 0].set_ylabel("Frequency bin")
+    axs[0, 0].set_ylabel("Frequency (Hz)")
+    plt.colorbar(im1, ax=axs[0, 0])
+    
+    # Add y-ticks at meaningful frequencies
+    freq_ticks = [20, 100, 500, 1000, 2000, 5000, 10000]
+    axs[0, 0].set_yticks(freq_ticks)
+    axs[0, 0].set_yticklabels([f"{f}" for f in freq_ticks])
     
     # Plot harmonic structure
     harm = planes['harmonic'].squeeze().cpu().numpy()
-    axs[0, 1].imshow(harm, aspect='auto', origin='lower')
+    im2 = axs[0, 1].imshow(
+        harm, 
+        aspect='auto', 
+        origin='lower',
+        extent=[0, harm.shape[1], 0, sample_rate/2]
+    )
     axs[0, 1].set_title("Harmonic Structure")
+    axs[0, 1].set_ylabel("Frequency (Hz)")
+    plt.colorbar(im2, ax=axs[0, 1])
+    axs[0, 1].set_yticks(freq_ticks)
+    axs[0, 1].set_yticklabels([f"{f}" for f in freq_ticks])
     
     # Plot spatial features (first channel - IPD)
     if planes['spatial'].shape[1] >= 2:
         spat = planes['spatial'][:, 0].squeeze().cpu().numpy()
-        axs[1, 0].imshow(spat, aspect='auto', origin='lower', cmap='coolwarm')
+        im3 = axs[1, 0].imshow(
+            spat, 
+            aspect='auto', 
+            origin='lower', 
+            cmap='coolwarm',
+            extent=[0, spat.shape[1], 0, sample_rate/2]
+        )
         axs[1, 0].set_title("Spatial Features (IPD)")
         axs[1, 0].set_xlabel("Time frame")
-        axs[1, 0].set_ylabel("Frequency bin")
+        axs[1, 0].set_ylabel("Frequency (Hz)")
+        plt.colorbar(im3, ax=axs[1, 0])
+        axs[1, 0].set_yticks(freq_ticks)
+        axs[1, 0].set_yticklabels([f"{f}" for f in freq_ticks])
     else:
         axs[1, 0].text(0.5, 0.5, "No spatial features\n(mono audio)", 
                      horizontalalignment='center', verticalalignment='center')
@@ -50,9 +82,18 @@ def plot_tensor_planes(planes, title="Wav2Tensor Representation"):
     
     # Plot psychoacoustic features
     psych = planes['psychoacoustic'].squeeze().cpu().numpy()
-    axs[1, 1].imshow(psych, aspect='auto', origin='lower')
+    im4 = axs[1, 1].imshow(
+        psych, 
+        aspect='auto', 
+        origin='lower',
+        extent=[0, psych.shape[1], 0, sample_rate/2]
+    )
     axs[1, 1].set_title("Psychoacoustic Features")
     axs[1, 1].set_xlabel("Time frame")
+    axs[1, 1].set_ylabel("Frequency (Hz)")
+    plt.colorbar(im4, ax=axs[1, 1])
+    axs[1, 1].set_yticks(freq_ticks)
+    axs[1, 1].set_yticklabels([f"{f}" for f in freq_ticks])
     
     plt.tight_layout()
     return fig
@@ -65,7 +106,7 @@ def main():
         # Use a test tone if no file is provided
         print("No audio file provided, generating a test tone...")
         # Generate a test tone with multiple harmonics
-        sample_rate = 16000
+        sample_rate = 22050
         duration = 3  # seconds
         t = torch.arange(0, duration, 1/sample_rate)
         
@@ -91,16 +132,17 @@ def main():
         signal_right = signal_right * envelope
         signal_right = signal_right / torch.max(torch.abs(signal_right))
         
-        # Stack channels
-        waveform = torch.stack([signal, signal_right])
+        # Stack channels to make a stereo waveform [2, T]
+        stereo_waveform = torch.stack([signal, signal_right])
         
         # For testing, let's save this waveform
         audio_path = "test_tone.wav"
-        torchaudio.save(audio_path, waveform.unsqueeze(0), sample_rate)
+        # torchaudio.save expects [channels, samples] format
+        torchaudio.save(audio_path, stereo_waveform, sample_rate)
         print(f"Test tone saved to {audio_path}")
         
-        # Prepare for Wav2Tensor
-        waveform = waveform.unsqueeze(0)  # Add batch dimension [B, C, T]
+        # Prepare for Wav2Tensor - add batch dimension [B, C, T]
+        waveform = stereo_waveform.unsqueeze(0)
     
     # If we're loading an actual file
     if audio_path and not 'waveform' in locals():
@@ -130,7 +172,12 @@ def main():
         print(f"  {name}: {plane.shape}")
     
     # Plot the different planes
-    fig = plot_tensor_planes(planes, title=f"Wav2Tensor: {os.path.basename(audio_path)}")
+    fig = plot_tensor_planes(
+        planes, 
+        title=f"Wav2Tensor: {os.path.basename(audio_path)}",
+        sample_rate=sample_rate,
+        n_fft=wav2tensor.n_fft
+    )
     
     # Save the plot
     output_path = os.path.splitext(audio_path)[0] + "_planes.png"
