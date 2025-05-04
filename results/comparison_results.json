@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-05-04 11:13:24",
+  "audio_file": "audio/song1.mp3",
+  "segment": {
+    "start": 0.0,
+    "duration": 3.0,
+    "shape": [
+      2,
+      66150
+    ]
+  },
+  "settings": {
+    "sample_rate": 22050,
+    "n_fft": 1024,
+    "hop_length": 256,
+    "harmonic_method": "hps",
+    "include_planes": [
+      "spectral",
+      "harmonic",
+      "spatial"
+    ],
+    "bit_depth": 16,
+    "use_adaptive_freq": false,
+    "fusion_method": "concat"
+  },
+  "performance": {
+    "original_time": 0.00733637809753418,
+    "lite_time": 0.006186008453369141,
+    "speedup": 1.1859631542434286,
+    "original_memory_kb": 2595.05859375,
+    "lite_memory_kb": 2595.05859375,
+    "memory_reduction": 1.0
+  },
+  "tensor_shapes": {
+    "original": [
+      1,
+      5,
+      513,
+      259
+    ],
+    "lite": [
+      1,
+      5,
+      513,
+      259
+    ]
+  }
+}
