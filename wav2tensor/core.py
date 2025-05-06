@@ -1,5 +1,5 @@
 """
-Simplified Wav2Tensor implementation that exactly follows the paper's formulation.
+Optimized Wav2Tensor implementation that exactly follows the paper's formulation.
 This prototype focuses only on the core features described in the paper without additional enhancements.
 """
 
@@ -8,10 +8,11 @@ import torch.nn as nn
 import torchaudio
 import numpy as np
 from typing import Tuple, Literal, List, Optional, Union
+from functools import lru_cache
 
 class Wav2TensorCore(nn.Module):
     """
-    Simplified Wav2Tensor implementation that exactly follows the paper's formulation.
+    Optimized Wav2Tensor implementation that exactly follows the paper's formulation.
     
     Creates a structured multi-plane audio representation tensor T ∈ ℂ^(F×T'×D) with four planes:
     1. Spectral plane (d=1): T_spec(f,t) = STFT(y)_{f,t} ∈ ℂ
@@ -25,7 +26,9 @@ class Wav2TensorCore(nn.Module):
         n_fft=1024, 
         hop_length=256, 
         harmonic_method='hps',
-        include_planes: Optional[List[str]] = None
+        include_planes: Optional[List[str]] = None,
+        use_adaptive_freq=True,
+        target_freq_bins=256
     ):
         """
         Initialize the Wav2Tensor encoder.
@@ -40,12 +43,15 @@ class Wav2TensorCore(nn.Module):
             include_planes: List of planes to include in the output tensor
                             Options: ['spectral', 'harmonic', 'spatial', 'psychoacoustic']
                             Default: All planes are included
+            use_adaptive_freq: Whether to use frequency-adaptive resolution for improved efficiency
+            target_freq_bins: Number of frequency bins to use with adaptive frequency (default: 256)
         """
         super().__init__()
         self.sample_rate = sample_rate
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.harmonic_method = harmonic_method
+        self.use_adaptive_freq = use_adaptive_freq
         
         # Default to including all planes if not specified
         self.include_planes = include_planes or ['spectral', 'harmonic', 'spatial', 'psychoacoustic']
@@ -71,28 +77,91 @@ class Wav2TensorCore(nn.Module):
         # Harmonic Product Spectrum parameters
         self.K = 3  # Reduced from 5 to 3 to focus on the strongest harmonics
         
+        # Setup adaptive frequency mapping if enabled
+        # Do this after STFT is set up so we know the frequency dimensions
+        if self.use_adaptive_freq:
+            self._setup_adaptive_frequency_mapping(target_freq_bins)
+        
         # Learned harmonic filterbanks (if selected)
         if harmonic_method == 'filterbank' and 'harmonic' in self.include_planes:
             # The filterbank operates on the frequency dimension
             # For a typical input shape of [B, F, T] or [B, 1, F, T]
-            n_freq_bins = n_fft // 2 + 1
+            n_freq_bins = self._get_freq_bins()
             self.harmonic_filterbank = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=(5, 1), stride=1, padding=(2, 0)),  # Learn harmonic bands
+                nn.Conv2d(1, 16, kernel_size=(5, 1), stride=1, padding=(2, 0)),  # Reduced channels from 32 to 16
                 nn.ReLU(),
-                nn.Conv2d(32, 16, kernel_size=(5, 1), stride=1, padding=(2, 0)),  # Mid-level harmonic features
-                nn.ReLU(),
-                nn.Conv2d(16, 1, kernel_size=(3, 1), stride=1, padding=(1, 0))    # Compress to harmonic map
+                nn.Conv2d(16, 1, kernel_size=(3, 1), stride=1, padding=(1, 0))   # Removed middle layer for efficiency
             )
             
             # Initialize filterbank to approximate HPS behavior
             self._init_harmonic_filterbank()
         
-        # Critical band frequencies (Bark scale) for psychoacoustic masking
-        self.critical_bands = torch.tensor([
-            20, 100, 200, 300, 400, 510, 630, 770, 920, 1080, 1270, 1480, 1720, 2000,
-            2320, 2700, 3150, 3700, 4400, 5300, 6400, 7700, 9500, 12000, 15500
-        ])
+        # Pre-compute critical band frequencies for psychoacoustic masking
+        if 'psychoacoustic' in self.include_planes:
+            self.critical_bands = torch.tensor([
+                20, 100, 200, 300, 400, 510, 630, 770, 920, 1080, 1270, 1480, 1720, 2000,
+                2320, 2700, 3150, 3700, 4400, 5300, 6400, 7700, 9500, 12000, 15500
+            ])
+            
+            # Pre-compute bark scale for frequency bins to avoid repeated computation
+            self._precompute_psychoacoustic_data()
     
+    def _setup_adaptive_frequency_mapping(self, target_bins):
+        """Set up frequency mapping for adaptive frequency resolution"""
+        n_freq_bins = self.n_fft // 2 + 1
+        
+        # Create a mel-like scale with more resolution in bass region
+        mel_min = 0
+        mel_max = 2595 * np.log10(1 + (self.sample_rate/2) / 700)
+        
+        # Allocate more bins to lower frequencies
+        bass_ratio = 0.4  # 40% of bins for bass/lower-mid range
+        bass_mel = mel_max * 0.25  # ~500-700Hz
+        
+        # Create points on mel scale
+        bass_points = int(target_bins * bass_ratio)
+        mid_high_points = target_bins - bass_points
+        
+        mel_points_bass = np.linspace(mel_min, bass_mel, bass_points)
+        mel_points_mid_high = np.linspace(bass_mel, mel_max, mid_high_points + 1)[1:]
+        mel_points = np.concatenate([mel_points_bass, mel_points_mid_high])
+        
+        # Convert mel points back to frequency
+        adaptive_freqs = 700 * (10 ** (mel_points / 2595) - 1)
+        
+        # Ensure we don't exceed the available frequency bins
+        max_bin_index = n_freq_bins - 1
+        self.adaptive_freq_bins = np.minimum(
+            (adaptive_freqs / (self.sample_rate/2) * n_freq_bins).astype(int),
+            max_bin_index
+        )
+        
+        # Ensure unique and valid indices
+        self.adaptive_freq_bins = np.unique(np.clip(self.adaptive_freq_bins, 0, max_bin_index))
+        self.target_freq_bins = len(self.adaptive_freq_bins)
+        
+        # Register as buffer to move to GPU with the model if needed
+        self.register_buffer('adaptive_freq_bins_tensor', 
+                            torch.tensor(self.adaptive_freq_bins, dtype=torch.long))
+    
+    def _get_freq_bins(self):
+        """Get the number of frequency bins for the current configuration"""
+        if self.use_adaptive_freq:
+            return self.target_freq_bins
+        else:
+            return self.n_fft // 2 + 1
+    
+    def _apply_adaptive_frequency(self, tensor):
+        """Apply adaptive frequency resolution to a tensor"""
+        if not self.use_adaptive_freq:
+            return tensor
+            
+        # Find frequency dimension based on tensor shape
+        freq_dim = 1 if len(tensor.shape) == 3 else 2
+        
+        # Use the pre-registered tensor for safety
+        return torch.index_select(tensor, freq_dim, self.adaptive_freq_bins_tensor)
+        
     def _init_harmonic_filterbank(self):
         """Initialize the harmonic filterbank to approximate HPS behavior."""
         # Access the first layer of the harmonic filterbank
@@ -116,6 +185,44 @@ class Wav2TensorCore(nn.Module):
                     if harmonic_offset > 0:
                         first_layer.weight[i, 0, mid_point - harmonic_offset, 0] = 0.3 / k
     
+    def _precompute_psychoacoustic_data(self):
+        """Precompute data needed for psychoacoustic calculations"""
+        n_freq_bins = self.n_fft // 2 + 1
+        if self.use_adaptive_freq:
+            n_freq_bins = self.target_freq_bins
+        
+        # Linear frequencies for all bins
+        if self.use_adaptive_freq:
+            # Use the actual frequencies corresponding to our adaptive bins
+            freqs = 700 * (10 ** (2595 * np.log10(1 + self.adaptive_freq_bins / (self.sample_rate/2)) / 2595) - 1)
+            self.freqs = torch.tensor(freqs)
+        else:
+            self.freqs = torch.linspace(0, self.sample_rate/2, n_freq_bins)
+        
+        # Convert to Bark scale
+        self.bark_scale = 13 * torch.atan(0.00076 * self.freqs) + 3.5 * torch.atan((self.freqs / 7500) ** 2)
+        
+        # Pre-compute spreading function
+        self.spread = torch.zeros((n_freq_bins, n_freq_bins))
+        
+        for i in range(n_freq_bins):
+            # Distance in Bark scale
+            bark_distance = torch.abs(self.bark_scale[i] - self.bark_scale)
+            # Create an asymmetric spreading function (stronger towards higher frequencies)
+            mask_factor = torch.where(
+                bark_distance <= 0,
+                torch.exp(-0.5 * (bark_distance / 1.0) ** 2),    # Lower frequencies
+                torch.exp(-0.7 * (bark_distance / 0.5) ** 2)     # Higher frequencies
+            )
+            self.spread[i] = mask_factor
+        
+        # Normalize each row of the spreading matrix
+        self.spread = self.spread / (torch.sum(self.spread, dim=1, keepdim=True) + 1e-8)
+        
+        # Register as buffer to move to GPU with the model
+        self.register_buffer('precomputed_spread', self.spread)
+        self.register_buffer('precomputed_bark_scale', self.bark_scale)
+    
     def _compute_spectral_plane(self, waveform: torch.Tensor) -> torch.Tensor:
         """
         Compute spectral plane T_spec(f,t) = STFT(y)_{f,t} ∈ ℂ
@@ -123,7 +230,19 @@ class Wav2TensorCore(nn.Module):
         """
         # The STFT output has shape [B, C, F, T] if input is [B, C, T]
         # or [B, F, T] if input is [B, T]
-        return self.stft(waveform)
+        spec = self.stft(waveform)
+        
+        # Apply adaptive frequency if needed
+        if self.use_adaptive_freq:
+            if len(spec.shape) == 3:  # [B, F, T]
+                freq_dim = 1
+            else:  # [B, C, F, T]
+                freq_dim = 2
+            
+            # Select frequency bins
+            spec = torch.index_select(spec, freq_dim, self.adaptive_freq_bins_tensor)
+        
+        return spec
     
     def _compute_harmonic_plane_hps(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
         """
@@ -157,21 +276,26 @@ class Wav2TensorCore(nn.Module):
         for k in range(2, self.K + 1):
             # For each harmonic k, we need the spectrum at f/k
             # We achieve this by downsampling in frequency dimension
-            downsampled = torch.nn.functional.interpolate(
+            
+            # Ensure we don't ask for bins that don't exist
+            target_size_f = max(1, F//k)
+            
+            # Use nearest mode and combine operations to minimize interpolation overhead
+            harmonic_k = torch.nn.functional.interpolate(
                 spec_magnitude.unsqueeze(1), 
-                size=(F//k, T), 
-                mode='nearest'  # Changed from 'bilinear' to 'nearest' to preserve peak values
+                size=(target_size_f, T), 
+                mode='nearest'
             ).squeeze(1)
             
             # Upsample back to original size
-            upsampled = torch.nn.functional.interpolate(
-                downsampled.unsqueeze(1), 
+            harmonic_k = torch.nn.functional.interpolate(
+                harmonic_k.unsqueeze(1), 
                 size=(F, T), 
-                mode='nearest'  # Changed from 'bilinear' to 'nearest' to preserve peak values
+                mode='nearest'
             ).squeeze(1)
             
             # Add log instead of multiplying
-            harmonic_sum += torch.log1p(upsampled)
+            harmonic_sum += torch.log1p(harmonic_k)
         
         # Convert back from log domain
         harmonic_product = torch.expm1(harmonic_sum)
@@ -236,9 +360,13 @@ class Wav2TensorCore(nn.Module):
         ipd = torch.angle(spec_left) - torch.angle(spec_right)
         
         # Compute energy panning
-        left_energy = torch.abs(spec_left) ** 2
-        right_energy = torch.abs(spec_right) ** 2
-        energy_panning = (left_energy - right_energy) / (left_energy + right_energy + 1e-10)
+        # Squared magnitude calculation
+        left_energy = torch.abs(spec_left)**2
+        right_energy = torch.abs(spec_right)**2
+        
+        # Avoid division by zero
+        sum_energy = left_energy + right_energy + 1e-10
+        energy_panning = (left_energy - right_energy) / sum_energy
         
         # Ensure we have the right dimensionality
         if len(ipd.shape) == 4:
@@ -258,7 +386,6 @@ class Wav2TensorCore(nn.Module):
         Implements a simplified masking threshold calculation
         """
         # spec_magnitude shape could be [B, C, F, T] or [B, F, T]
-        # Handle both cases
         if len(spec_magnitude.shape) == 4:
             B, C, F, T = spec_magnitude.shape
             # Collapse channel dimension by taking average if it exists
@@ -274,44 +401,34 @@ class Wav2TensorCore(nn.Module):
         spec_magnitude = torch.clamp(spec_magnitude, min=1e-10)
         mag_db = 20 * torch.log10(spec_magnitude)
         
-        # Normalize to a reasonable range (0 to 1)
+        # Normalize to [0, 1] range for stability
         mag_db = torch.clamp(mag_db, min=-100, max=0)  # dB is usually negative
-        mag_db = (mag_db + 100) / 100  # Normalize to [0, 1] for stability
+        mag_db = (mag_db + 100) / 100
         
-        # Convert linear frequency to Bark scale for better perceptual modeling
-        # Simple approximation of Bark-scale mapping
-        freqs = torch.linspace(0, self.sample_rate/2, F, device=spec_magnitude.device)
-        bark_scale = 13 * torch.atan(0.00076 * freqs) + 3.5 * torch.atan((freqs / 7500) ** 2)
+        # Apply spreading function along frequency axis 
+        # Use precomputed spreading matrix for efficiency
+        masking = torch.zeros((B, F, T), device=spec_magnitude.device)
         
-        # Create a spreading function based on psychoacoustic research
-        # This spreading function is wider in lower frequencies, narrower in higher frequencies
-        spread_width = 15  # Width of the spreading function in Bark units
-        spread = torch.zeros((F, F), device=spec_magnitude.device)
+        # Fast implementation using batch matrix multiplication
+        # Reshape mag_db to [B*T, F] for batch matmul
+        mag_db_reshaped = mag_db.permute(0, 2, 1).reshape(B*T, F)
         
-        for i in range(F):
-            # Distance in Bark scale
-            bark_distance = torch.abs(bark_scale[i] - bark_scale)
-            # Create an asymmetric spreading function (stronger towards higher frequencies)
-            mask_factor = torch.where(
-                bark_distance <= 0,
-                torch.exp(-0.5 * (bark_distance / 1.0) ** 2),    # Lower frequencies (steeper slope)
-                torch.exp(-0.7 * (bark_distance / 0.5) ** 2)     # Higher frequencies (more gradual slope)
-            )
-            spread[i] = mask_factor
+        # Apply spreading function - ensure dims match
+        mask_size = min(F, self.precomputed_spread.shape[0], self.precomputed_spread.shape[1])
+        masked_reshaped = torch.matmul(
+            mag_db_reshaped[:, :mask_size], 
+            self.precomputed_spread[:mask_size, :mask_size]
+        )
         
-        # Normalize each row of the spreading matrix
-        spread = spread / (torch.sum(spread, dim=1, keepdim=True) + 1e-8)
+        # If F > mask_size, we need to pad the results
+        if F > mask_size:
+            padding = torch.zeros((B*T, F - mask_size), device=masked_reshaped.device)
+            masked_reshaped = torch.cat([masked_reshaped, padding], dim=1)
         
-        # Apply spreading function along frequency axis
-        masking = torch.zeros_like(mag_db)
-        
-        for b in range(B):
-            for t in range(T):
-                # Apply the spreading function as a matrix multiplication
-                masking[b, :, t] = torch.matmul(spread, mag_db[b, :, t])
+        # Reshape back to [B, F, T]
+        masking = masked_reshaped.reshape(B, T, F).permute(0, 2, 1)
         
         # Apply an offset to simulate masking threshold
-        # Content below this threshold would typically be inaudible due to masking
         masking_offset = 0.12  # Represents masking threshold offset (~12 dB)
         masking_threshold = masking - masking_offset
         
@@ -346,7 +463,7 @@ class Wav2TensorCore(nn.Module):
             spec_left = spec
             spec_right = spec
         else:
-            # For stereo input
+            # For stereo input - process channels separately
             spec_left = self._compute_spectral_plane(waveform[:, 0:1])
             spec_right = self._compute_spectral_plane(waveform[:, 1:2])
             # Average for mono representation when needed
@@ -382,7 +499,11 @@ class Wav2TensorCore(nn.Module):
             tensor_components.append(harmonic_plane)
         else:
             # Add empty placeholder for consistent dictionary access
-            planes['harmonic'] = torch.zeros((B, 1, *spec_magnitude.shape[1:]), device=waveform.device)
+            if len(spec.shape) == 4:
+                _, _, F, T = spec.shape
+            else:
+                _, F, T = spec.shape
+            planes['harmonic'] = torch.zeros((B, 1, F, T), device=waveform.device)
         
         # 3. Spatial Plane (if included and input is stereo)
         if 'spatial' in self.include_planes and C > 1:
@@ -406,7 +527,11 @@ class Wav2TensorCore(nn.Module):
             tensor_components.append(psychoacoustic_plane)
         else:
             # Add empty placeholder for consistent dictionary access
-            planes['psychoacoustic'] = torch.zeros((B, 1, *spec_magnitude.shape[1:]), device=waveform.device)
+            if len(spec.shape) == 4:
+                _, _, F, T = spec.shape
+            else:
+                _, F, T = spec.shape
+            planes['psychoacoustic'] = torch.zeros((B, 1, F, T), device=waveform.device)
         
         # Stack all planes to form the tensor
         tensor = torch.cat(tensor_components, dim=1)

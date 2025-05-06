@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-05-04 11:13:24",
+  "timestamp": "2025-05-04 11:23:24",
   "audio_file": "audio/song1.mp3",
   "segment": {
     "start": 0.0,
@@ -24,9 +24,9 @@
     "fusion_method": "concat"
   },
   "performance": {
-    "original_time": 0.00733637809753418,
-    "lite_time": 0.006186008453369141,
-    "speedup": 1.1859631542434286,
+    "original_time": 0.006665468215942383,
+    "lite_time": 0.006853342056274414,
+    "speedup": 0.9725865367890068,
     "original_memory_kb": 2595.05859375,
     "lite_memory_kb": 2595.05859375,
     "memory_reduction": 1.0

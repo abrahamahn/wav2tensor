@@ -1,0 +1,229 @@
+{
+  "audio_file": "audio/song1.mp3",
+  "segment_duration": 3.0,
+  "start_time": 0.0,
+  "sample_rate": 22050,
+  "n_fft": 1024,
+  "hop_length": 256,
+  "n_mels": 80,
+  "include_planes": [
+    "spectral",
+    "harmonic",
+    "spatial"
+  ],
+  "harmonic_method": "hps",
+  "bit_depth": 16,
+  "fusion_method": "concat",
+  "use_adaptive_freq": false,
+  "waveform_shape": [
+    2,
+    66150
+  ],
+  "runs": [
+    {
+      "run_idx": 0,
+      "waveform": {
+        "process_time": 0.0003490447998046875,
+        "memory_kb": 516.796875,
+        "tensor_shape": [
+          1,
+          2,
+          66150
+        ],
+        "method": "waveform"
+      },
+      "mel_spectrogram": {
+        "process_time": 0.001970529556274414,
+        "memory_kb": 161.875,
+        "tensor_shape": [
+          1,
+          2,
+          80,
+          259
+        ],
+        "method": "mel_spectrogram"
+      },
+      "wav2tensor": {
+        "process_time": 0.002352476119995117,
+        "memory_kb": 945.95703125,
+        "tensor_shape": [
+          1,
+          5,
+          187,
+          259
+        ],
+        "method": "wav2tensor",
+        "planes": {
+          "spectral": [
+            1,
+            1,
+            187,
+            259
+          ],
+          "harmonic": [
+            1,
+            1,
+            187,
+            259
+          ],
+          "spatial": [
+            1,
+            2,
+            187,
+            259
+          ],
+          "psychoacoustic": [
+            1,
+            1,
+            187,
+            259
+          ]
+        }
+      },
+      "wav2tensor_lite": {
+        "quant_params": [
+          NaN,
+          NaN
+        ],
+        "tensor_shape": {
+          "spectral": [
+            1,
+            1,
+            513,
+            259
+          ],
+          "harmonic": [
+            1,
+            1,
+            513,
+            259
+          ],
+          "spatial": [
+            1,
+            2,
+            513,
+            259
+          ],
+          "fused": [
+            1,
+            5,
+            513,
+            259
+          ]
+        },
+        "sample_rate": 22050,
+        "n_fft": 1024,
+        "hop_length": 256,
+        "fusion_method": "concat",
+        "bit_depth": 16,
+        "process_time": 0.0033731460571289062,
+        "method": "wav2tensor_lite",
+        "memory_kb": 2595.05859375
+      }
+    }
+  ],
+  "avg_results": {
+    "waveform": {
+      "avg_process_time": 0.0003490447998046875,
+      "avg_memory_kb": 516.796875,
+      "tensor_shape": [
+        1,
+        2,
+        66150
+      ]
+    },
+    "mel_spectrogram": {
+      "avg_process_time": 0.001970529556274414,
+      "avg_memory_kb": 161.875,
+      "tensor_shape": [
+        1,
+        2,
+        80,
+        259
+      ]
+    },
+    "wav2tensor": {
+      "avg_process_time": 0.002352476119995117,
+      "avg_memory_kb": 945.95703125,
+      "tensor_shape": [
+        1,
+        5,
+        187,
+        259
+      ],
+      "planes": {
+        "spectral": [
+          1,
+          1,
+          187,
+          259
+        ],
+        "harmonic": [
+          1,
+          1,
+          187,
+          259
+        ],
+        "spatial": [
+          1,
+          2,
+          187,
+          259
+        ],
+        "psychoacoustic": [
+          1,
+          1,
+          187,
+          259
+        ]
+      }
+    },
+    "wav2tensor_lite": {
+      "avg_process_time": 0.0033731460571289062,
+      "avg_memory_kb": 2595.05859375,
+      "tensor_shape": {
+        "spectral": [
+          1,
+          1,
+          513,
+          259
+        ],
+        "harmonic": [
+          1,
+          1,
+          513,
+          259
+        ],
+        "spatial": [
+          1,
+          2,
+          513,
+          259
+        ],
+        "fused": [
+          1,
+          5,
+          513,
+          259
+        ]
+      },
+      "fusion_method": "concat",
+      "bit_depth": 16,
+      "use_adaptive_freq": false
+    },
+    "speedup": {
+      "wav2tensor_vs_waveform": 0.1483733657646701,
+      "wav2tensor_vs_mel": 0.8376406202493158,
+      "wav2tensor_lite_vs_wav2tensor": 0.6974130619168787,
+      "wav2tensor_lite_vs_waveform": 0.10347752332485156,
+      "wav2tensor_lite_vs_mel": 0.5841815097540288
+    },
+    "memory_reduction": {
+      "wav2tensor_vs_waveform": 0.5463217227923111,
+      "wav2tensor_vs_mel": 0.1711229946524064,
+      "wav2tensor_lite_vs_wav2tensor": 0.3645224171539961,
+      "wav2tensor_lite_vs_waveform": 0.19914651493598862,
+      "wav2tensor_lite_vs_mel": 0.06237816764132553
+    }
+  }
+}
