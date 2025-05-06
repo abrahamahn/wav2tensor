@@ -1,0 +1,19 @@
+# Default benchmark configuration
+sample_rate: 22050
+n_fft: 1024
+hop_length: 256
+n_mels: 80
+harmonic_method: hps
+bit_depth: 16
+fusion_method: concat
+use_adaptive_freq: false
+target_freq_bins: 256
+include_planes:
+  - spectral
+  - harmonic
+  - spatial
+  - psychoacoustic
+n_runs: 5
+segment_duration: null  # Process entire file
+start_time: 0.0
+output_dir: benchmarks/results 

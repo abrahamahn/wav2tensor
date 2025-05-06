@@ -164,6 +164,31 @@ This script:
 3. Evaluates using PESQ and STOI metrics
 4. Generates comparison visualizations
 
+### Running the Test Suite
+
+The project includes a comprehensive test suite to ensure reliable functionality:
+
+```bash
+# Run all tests with coverage report
+python run_tests.py -v
+
+# Run specific test categories
+python run_tests.py tests/unit/ -v
+python run_tests.py tests/integration/ -v
+python run_tests.py tests/performance/ -v
+
+# Run specific test file
+python run_tests.py tests/unit/test_core.py -v
+```
+
+The test suite is organized into categories:
+- **Unit tests**: Testing individual components in isolation
+- **Integration tests**: Verifying components work together properly
+- **Performance tests**: Measuring computational efficiency and memory usage
+- **Analysis tools**: Scripts for in-depth analysis of specific features
+
+For more details about running tests, see the [tests/README.md](tests/README.md) file.
+
 ## Model Architecture
 
 Wav2Tensor consists of four primary components:
@@ -226,8 +251,15 @@ wav2tensor/
 │   └── evaluation.py   # Evaluation against baselines
 ├── analyze_wav2tensor_lite.py # Compare original vs lite versions
 ├── wav2tensor_analysis.py     # Analysis script for original version
-├── tests/              # Unit tests
-│   └── test_wav2tensor.py  # Test cases
+├── tests/              # Test suite
+│   ├── unit/           # Unit tests for individual components
+│   │   ├── planes/     # Tests for individual planes
+│   ├── integration/    # Integration tests
+│   ├── performance/    # Performance and benchmarking tests
+│   ├── analysis/       # Analysis scripts and tools
+│   ├── conftest.py     # Shared test fixtures
+│   └── README.md       # Test documentation
+├── run_tests.py        # Script to run tests with coverage
 ├── README.md           # This file
 ├── setup.py            # Package setup
 └── requirements.txt    # Dependencies

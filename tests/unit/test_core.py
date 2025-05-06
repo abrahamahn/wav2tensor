@@ -5,6 +5,7 @@ Tests for core functionalities of Wav2Tensor.
 import pytest
 import torch
 import numpy as np
+from wav2tensor import Wav2TensorCore
 
 
 class TestWav2TensorCore:

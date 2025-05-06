@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 
 # Add parent directory to path to import wav2tensor
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from wav2tensor import Wav2TensorCore
 
@@ -278,7 +278,13 @@ def main():
     parser.add_argument("audio_file", help="Path to the audio file")
     parser.add_argument("--duration", type=float, default=5.0, help="Duration in seconds to analyze (default: 5s)")
     parser.add_argument("--start", type=float, default=0.0, help="Start time in seconds (default: 0s)")
+    parser.add_argument("--output-dir", type=str, help="Output directory for results", default="results")
+    parser.add_argument("--adaptive", action="store_true", help="Use adaptive frequency resolution")
+    parser.add_argument("--target-freq-bins", type=int, default=256, help="Number of frequency bins with adaptive mode")
     args = parser.parse_args()
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
     
     # Load the audio file
     try:
@@ -301,15 +307,20 @@ def main():
         segment = segment.unsqueeze(0)  # [B, C, T]
         
         # Initialize Wav2Tensor encoder
-        wav2tensor = Wav2TensorCore(sample_rate=sample_rate)
+        wav2tensor = Wav2TensorCore(
+            sample_rate=sample_rate,
+            use_adaptive_freq=args.adaptive,
+            target_freq_bins=args.target_freq_bins
+        )
         
         # Convert to Wav2Tensor representation
         tensor, planes = wav2tensor(segment)
         
         # Generate output path
-        base_name = os.path.splitext(args.audio_file)[0]
+        base_name = os.path.splitext(os.path.basename(args.audio_file))[0]
         segment_info = f"_{int(args.start)}s_to_{int(args.start + segment_duration)}s"
-        output_prefix = f"{base_name}{segment_info}"
+        adaptive_info = "_adaptive" if args.adaptive else ""
+        output_prefix = os.path.join(args.output_dir, f"{base_name}{segment_info}{adaptive_info}")
         output_path = f"{output_prefix}_harmonic.png"
         
         # Log tensor data
@@ -322,6 +333,9 @@ def main():
         
         # Plot the harmonic plane with enhanced visualization
         title = f"Harmonic Analysis: {os.path.basename(args.audio_file)} ({args.start:.1f}s to {args.start + segment_duration:.1f}s)"
+        if args.adaptive:
+            title += f" [Adaptive: {planes['harmonic'].shape[2]} bins]"
+            
         fig = plot_harmonic_plane(
             planes, 
             title=title,

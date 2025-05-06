@@ -1,19 +1,19 @@
 """
-Mel-spectrogram computation with benchmarking.
-This script provides functions to compute Mel-spectrograms from audio files and measure performance.
+Mel-spectrogram processor for benchmarking.
+
+This module implements a processor for computing Mel-spectrograms with benchmarking capabilities.
 """
 
-import os
-import time
 import torch
 import torchaudio
-import numpy as np
-from typing import Tuple, Dict, Optional
+from typing import Dict, Optional, Tuple
 
-class MelSpectrogramProcessor:
-    """
-    Processor for calculating Mel-spectrograms with performance tracking.
-    """
+from benchmarks.processors.base import BaseProcessor
+
+
+class MelSpectrogramProcessor(BaseProcessor):
+    """Processor for Mel-spectrograms with performance tracking."""
+    
     def __init__(
         self,
         sample_rate: int = 22050,
@@ -36,7 +36,7 @@ class MelSpectrogramProcessor:
             f_max: Maximum frequency (default: sample_rate/2)
             power: Power of the magnitude spectrogram (default: 2.0)
         """
-        self.sample_rate = sample_rate
+        super().__init__(sample_rate=sample_rate, name="mel_spectrogram")
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.n_mels = n_mels
@@ -62,19 +62,12 @@ class MelSpectrogramProcessor:
         Process an audio waveform into a Mel-spectrogram and measure performance.
         
         Args:
-            waveform: Audio waveform tensor with shape [channels, samples]
+            waveform: Audio waveform tensor with shape [batch, channels, samples]
             
         Returns:
-            mel_spec: Mel-spectrogram tensor
+            mel_spec: Mel-spectrogram tensor with shape [batch, channels, n_mels, time]
             metrics: Dictionary with performance metrics
         """
-        # Ensure the waveform has batch dimension
-        if len(waveform.shape) == 2:  # [channels, samples]
-            waveform = waveform.unsqueeze(0)  # [batch, channels, samples]
-        
-        # Start timing
-        start_time = time.time()
-        
         # Store batch dimension but process with channels
         batch_size = waveform.shape[0]
         channels = waveform.shape[1]
@@ -91,7 +84,7 @@ class MelSpectrogramProcessor:
             
             # Stack channels if multichannel
             if channels > 1:
-                batch_mel = torch.cat(batch_mels, dim=0)  # [channels, n_mels, time]
+                batch_mel = torch.stack(batch_mels, dim=0)  # [channels, n_mels, time]
             else:
                 batch_mel = batch_mels[0]  # [1, n_mels, time]
                 
@@ -103,54 +96,22 @@ class MelSpectrogramProcessor:
         else:
             mel_spec = mel_specs[0].unsqueeze(0)  # [1, channels, n_mels, time]
         
-        # End timing
-        process_time = time.time() - start_time
-        
         # Calculate memory usage
         memory_bytes = mel_spec.element_size() * mel_spec.nelement()
         memory_kb = memory_bytes / 1024
         
         # Collect metrics
         metrics = {
-            "process_time": process_time,
             "memory_kb": memory_kb,
-            "tensor_shape": list(mel_spec.shape)
+            "tensor_shape": list(mel_spec.shape),
+            "n_fft": self.n_fft,
+            "hop_length": self.hop_length,
+            "n_mels": self.n_mels
         }
         
         return mel_spec, metrics
 
-    def process_file(self, audio_file: str, segment_duration: Optional[float] = None, start_time: float = 0.0) -> Tuple[torch.Tensor, Dict]:
-        """
-        Process an audio file into a Mel-spectrogram and measure performance.
-        
-        Args:
-            audio_file: Path to audio file
-            segment_duration: Duration of segment to process in seconds (default: entire file)
-            start_time: Start time in seconds (default: 0.0)
-            
-        Returns:
-            mel_spec: Mel-spectrogram tensor
-            metrics: Dictionary with performance metrics
-        """
-        # Load audio file
-        waveform, file_sr = torchaudio.load(audio_file)
-        
-        # Resample if needed
-        if file_sr != self.sample_rate:
-            resampler = torchaudio.transforms.Resample(file_sr, self.sample_rate)
-            waveform = resampler(waveform)
-        
-        # Extract segment if requested
-        if segment_duration is not None:
-            start_sample = int(start_time * self.sample_rate)
-            segment_samples = int(segment_duration * self.sample_rate)
-            end_sample = min(start_sample + segment_samples, waveform.shape[1])
-            waveform = waveform[:, start_sample:end_sample]
-        
-        # Process waveform
-        return self.process(waveform)
 
-# Example usage
 if __name__ == "__main__":
     import argparse
     
@@ -162,6 +123,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_mels", type=int, default=80, help="Number of Mel bands (default: 80)")
     parser.add_argument("--start", type=float, default=0.0, help="Start time in seconds (default: 0.0)")
     parser.add_argument("--duration", type=float, default=None, help="Duration in seconds (default: entire file)")
+    parser.add_argument("--n-runs", type=int, default=5, help="Number of benchmark runs (default: 5)")
+    
     args = parser.parse_args()
     
     # Initialize processor
@@ -173,13 +136,28 @@ if __name__ == "__main__":
     )
     
     # Process audio file
-    mel_spec, metrics = processor.process_file(
+    output, metrics = processor.process_file(
         audio_file=args.audio_file,
         segment_duration=args.duration,
         start_time=args.start
     )
     
-    # Print performance metrics
-    print(f"Mel-spectrogram shape: {mel_spec.shape}")
-    print(f"Processing time: {metrics['process_time']:.4f} seconds")
-    print(f"Memory usage: {metrics['memory_kb']:.2f} KB") 
+    # Benchmark
+    import torchaudio
+    waveform, _ = torchaudio.load(args.audio_file)
+    
+    # Extract segment if requested
+    if args.duration is not None:
+        start_sample = int(args.start * args.sr)
+        segment_samples = int(args.duration * args.sr)
+        end_sample = min(start_sample + segment_samples, waveform.shape[1])
+        waveform = waveform[:, start_sample:end_sample]
+    
+    # Benchmark
+    metrics = processor.benchmark(waveform, n_runs=args.n_runs)
+    
+    # Print benchmark results
+    print(f"Mel-spectrogram processor benchmark results ({args.n_runs} runs):")
+    print(f"  Average processing time: {metrics['avg_process_time']:.6f} seconds")
+    print(f"  Memory usage: {metrics['avg_memory_kb']:.2f} KB")
+    print(f"  Shape: {metrics['tensor_shape']}") 
