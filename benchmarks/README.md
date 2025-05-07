@@ -5,7 +5,6 @@ This directory contains tools for benchmarking and comparing different audio rep
 1. Raw waveform
 2. Mel-spectrogram
 3. Wav2Tensor (full implementation)
-4. Wav2TensorLite (optimized implementation)
 
 ## Directory Structure
 
@@ -13,7 +12,7 @@ This directory contains tools for benchmarking and comparing different audio rep
   - `processors/` - Audio representation processors
   - `configs/` - Configuration management
   - `runners/` - Benchmark execution
-  - `visualizers/` - Results visualization (coming soon)
+  - `visualizers/` - Results visualization
   - `results/` - Benchmark results storage
 
 ## Running Benchmarks
@@ -33,8 +32,6 @@ Optional arguments:
 - `--n_mels` - Number of Mel bands (default: 80)
 - `--planes` - Planes to include: 'default', 'all', 'minimal', or comma-separated list
 - `--method` - Harmonic plane method: 'hps' or 'filterbank' (default: 'hps')
-- `--bit_depth` - Bit depth for Wav2TensorLite quantization: 8 or 16 (default: 16)
-- `--fusion` - Fusion method for Wav2TensorLite: 'concat', 'add', or 'learned' (default: 'concat')
 - `--adaptive` - Use adaptive frequency resolution (default: False)
 - `--target_freq_bins` - Number of frequency bins with adaptive frequency (default: 256)
 - `--start` - Start time in seconds (default: 0.0)
@@ -62,8 +59,6 @@ n_fft: 1024
 hop_length: 256
 n_mels: 80
 harmonic_method: hps
-bit_depth: 16
-fusion_method: concat
 use_adaptive_freq: false
 target_freq_bins: 256
 include_planes:
@@ -87,4 +82,38 @@ Benchmark results are saved to the specified output directory in JSON format. Th
 - Output tensor shapes
 - Configuration parameters
 
-You can use these results to compare the performance of different audio representation methods. 
+You can use these results to compare the performance of different audio representation methods.
+
+## Visualizing Results
+
+To generate visualizations from benchmark results, use:
+
+```bash
+python benchmarks/visualizers/plots.py benchmarks/results/YOUR_RESULT_FILE.json
+```
+
+This creates three visualization plots:
+- Processing time comparison
+- Memory usage comparison
+- Speedup factors
+
+## Optimization Recommendations
+
+Based on benchmark results, consider these optimizations:
+
+### For Speed
+- Use `--planes minimal` to include only the spectral plane
+- Increase hop length with `--hop_length 512`
+- Limit audio duration for faster processing
+
+### For Memory Efficiency
+- Enable adaptive frequency with `--adaptive --target_freq_bins 128`
+- Use minimal planes configuration
+- Increase hop length to reduce time frames
+
+### For Best Features/Performance Balance
+- Use spectral and harmonic planes only
+- Enable adaptive frequency with moderate target bins (128-256)
+- Adjust hop length based on your specific audio application
+
+For detailed benchmark comparisons, see `benchmarks/RESULTS.md`. 

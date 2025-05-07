@@ -24,14 +24,14 @@ def plot_process_time(results: Dict, output_path: Optional[str] = None):
     times = []
     
     # Extract data
-    for method in ['waveform', 'mel_spectrogram', 'wav2tensor', 'wav2tensor_lite']:
+    for method in ['waveform', 'mel_spectrogram', 'wav2tensor']:
         if method in results:
             methods.append(method.replace('_', ' ').title())
             times.append(results[method]['avg_process_time'])
     
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 6))
-    bars = ax.bar(methods, times, color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12'])
+    bars = ax.bar(methods, times, color=['#3498db', '#2ecc71', '#e74c3c'])
     
     # Add values above bars
     for bar in bars:
@@ -68,14 +68,14 @@ def plot_memory_usage(results: Dict, output_path: Optional[str] = None):
     memory = []
     
     # Extract data
-    for method in ['waveform', 'mel_spectrogram', 'wav2tensor', 'wav2tensor_lite']:
+    for method in ['waveform', 'mel_spectrogram', 'wav2tensor']:
         if method in results:
             methods.append(method.replace('_', ' ').title())
             memory.append(results[method]['avg_memory_kb'])
     
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 6))
-    bars = ax.bar(methods, memory, color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12'])
+    bars = ax.bar(methods, memory, color=['#3498db', '#2ecc71', '#e74c3c'])
     
     # Add values above bars
     for bar in bars:
@@ -130,7 +130,7 @@ def plot_speedup(results: Dict, output_path: Optional[str] = None):
     
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 6))
-    bars = ax.barh(comparisons, speedups, color=['#9b59b6', '#3498db', '#2ecc71', '#e74c3c', '#f39c12'])
+    bars = ax.barh(comparisons, speedups, color=['#9b59b6', '#3498db'])
     
     # Add values to the right of bars
     for i, bar in enumerate(bars):

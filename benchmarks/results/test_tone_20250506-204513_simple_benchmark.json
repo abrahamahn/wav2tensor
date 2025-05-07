@@ -1,0 +1,53 @@
+{
+  "audio_file": "test_tone.wav",
+  "sample_rate": 22050,
+  "n_fft": 1024,
+  "hop_length": 512,
+  "n_mels": 80,
+  "include_planes": [
+    "spectral"
+  ],
+  "harmonic_method": "hps",
+  "use_adaptive_freq": true,
+  "target_freq_bins": 128,
+  "timestamp": "20250506-204513",
+  "n_runs": 5,
+  "waveform": {
+    "avg_process_time": 8.044242858886718e-05,
+    "avg_memory_kb": 516.796875,
+    "tensor_shape": [
+      1,
+      2,
+      66150
+    ],
+    "n_runs": 5
+  },
+  "mel_spectrogram": {
+    "avg_process_time": 0.0008848667144775391,
+    "avg_memory_kb": 81.25,
+    "tensor_shape": [
+      1,
+      2,
+      1,
+      80,
+      130
+    ],
+    "n_runs": 5
+  },
+  "wav2tensor": {
+    "avg_process_time": 0.0005908966064453125,
+    "avg_memory_kb": 225.46875,
+    "tensor_shape": [
+      1,
+      4,
+      111,
+      130
+    ],
+    "n_runs": 5
+  },
+  "speedup": {
+    "wav2tensor_vs_waveform": 0.13613621691413813,
+    "wav2tensor_vs_mel": 1.4974983860555198
+  },
+  "output_dir": "benchmarks/results"
+}

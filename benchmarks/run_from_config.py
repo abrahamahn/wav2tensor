@@ -47,8 +47,6 @@ def main():
         n_mels=config["n_mels"],
         include_planes=config["include_planes"],
         harmonic_method=config["harmonic_method"],
-        bit_depth=config["bit_depth"],
-        fusion_method=config["fusion_method"],
         use_adaptive_freq=config["use_adaptive_freq"],
         target_freq_bins=config["target_freq_bins"],
         output_dir=config["output_dir"]

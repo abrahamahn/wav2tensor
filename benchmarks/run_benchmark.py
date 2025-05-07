@@ -31,10 +31,6 @@ def main():
                         help="Planes to include: 'default', 'all', 'minimal', or comma-separated list")
     parser.add_argument("--method", type=str, choices=["hps", "filterbank"], default="hps",
                         help="Harmonic plane method (default: hps)")
-    parser.add_argument("--bit_depth", type=int, choices=[8, 16], default=16,
-                        help="Bit depth for Wav2TensorLite quantization (default: 16)")
-    parser.add_argument("--fusion", type=str, choices=["concat", "add", "learned"], default="concat",
-                        help="Fusion method for Wav2TensorLite (default: concat)")
     parser.add_argument("--adaptive", action="store_true", help="Use adaptive frequency resolution")
     parser.add_argument("--target_freq_bins", type=int, default=256,
                         help="Number of frequency bins with adaptive frequency (default: 256)")
@@ -65,8 +61,6 @@ def main():
         n_mels=args.n_mels,
         include_planes=include_planes,
         harmonic_method=args.method,
-        bit_depth=args.bit_depth,
-        fusion_method=args.fusion,
         use_adaptive_freq=args.adaptive,
         target_freq_bins=args.target_freq_bins,
         output_dir=args.output_dir

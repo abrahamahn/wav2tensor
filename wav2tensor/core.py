@@ -9,6 +9,7 @@ import torchaudio
 import numpy as np
 from typing import Tuple, Literal, List, Optional, Union
 from functools import lru_cache
+import torch.nn.functional as F
 
 class Wav2TensorCore(nn.Module):
     """
@@ -152,10 +153,10 @@ class Wav2TensorCore(nn.Module):
         harmonic_indices = {}
         for k in range(2, self.K + 1):
             # Calculate source indices (where we sample from)
-            source_indices = np.arange(0, n_freq_bins // k)
+            source_indices = torch.arange(0, n_freq_bins // k, dtype=torch.long)
             
             # Calculate target indices (where they map to in full spectrum)
-            target_indices = np.zeros(n_freq_bins, dtype=np.int64)
+            target_indices = torch.zeros(n_freq_bins, dtype=torch.long)
             
             # Fill target indices with nearest neighbor expansion
             for i in range(k):
@@ -169,8 +170,7 @@ class Wav2TensorCore(nn.Module):
         
         # Register buffers for each harmonic's indices
         for k, indices in harmonic_indices.items():
-            self.register_buffer(f'harmonic_indices_{k}', 
-                                torch.tensor(indices, dtype=torch.long))
+            self.register_buffer(f'harmonic_indices_{k}', indices)
     
     def _get_freq_bins(self):
         """Get the number of frequency bins for the current configuration"""
@@ -208,7 +208,7 @@ class Wav2TensorCore(nn.Module):
         
         # Linear frequencies for all bins - vectorized computation
         if self.use_adaptive_freq:
-            bin_ratio = self.adaptive_freq_bins / (self.n_fft // 2)
+            bin_ratio = torch.tensor(self.adaptive_freq_bins, dtype=torch.float32) / (self.n_fft // 2)
             freqs = self.sample_rate/2 * bin_ratio
         else:
             freqs = torch.linspace(0, self.sample_rate/2, n_freq_bins)
@@ -237,8 +237,7 @@ class Wav2TensorCore(nn.Module):
         self.register_buffer('precomputed_spread', spread)
         self.register_buffer('precomputed_bark_scale', bark_scale)
     
-    @torch.jit.script
-    def _ensure_4d(self, tensor):
+    def _ensure_4d(self, tensor: torch.Tensor) -> torch.Tensor:
         """Ensure tensor has shape [B, C, F, T] for consistent processing"""
         if len(tensor.shape) == 3:  # [B, F, T]
             return tensor.unsqueeze(1)
@@ -310,13 +309,15 @@ class Wav2TensorCore(nn.Module):
             
             # Use the indices for direct sampling (much faster than interpolation)
             # This maps harmonic relationships directly without need for interpolation
-            harmonic_k = torch.index_select(spec_magnitude, 2, harmonic_indices[:F])
+            harmonic_k = torch.index_select(spec_magnitude, 2, harmonic_indices[:F].to(spec_magnitude.device))
             
             # Add to the sum in-place to save memory
             harmonic_sum.add_(torch.log1p(harmonic_k))
         
-        # Convert back from log domain 
-        return torch.expm1(harmonic_sum)
+        # Convert back from log domain and normalize
+        harmonic_plane = torch.expm1(harmonic_sum) / self.K
+        
+        return harmonic_plane
     
     def _compute_harmonic_plane_filterbank(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
         """
@@ -400,11 +401,11 @@ class Wav2TensorCore(nn.Module):
         energy_panning = left_energy.div_(sum_energy)  # In-place division
         
         # Stack channels efficiently
-        # Reshape to include channel dimension
-        ipd = ipd.unsqueeze(1) 
-        energy_panning = energy_panning.unsqueeze(1)
+        # Ensure both have same shape [B, 1, F, T]
+        ipd = ipd.unsqueeze(1) if ipd.dim() == 3 else ipd
+        energy_panning = energy_panning.unsqueeze(1) if energy_panning.dim() == 3 else energy_panning
         
-        # Single concatenation operation
+        # Single concatenation operation along channel dimension
         return torch.cat([ipd, energy_panning], dim=1)
     
     def _compute_psychoacoustic_plane_optimized(self, spec_magnitude: torch.Tensor) -> torch.Tensor:
@@ -459,6 +460,8 @@ class Wav2TensorCore(nn.Module):
             tensor: (B, D, F, T') structured tensor with selected planes
             planes: dictionary with individual planes for easier access
         """
+        print(f"\nWav2TensorCore forward: input shape = {waveform.shape}")
+        
         # Store original precision for later conversion
         original_dtype = waveform.dtype
         
@@ -467,6 +470,7 @@ class Wav2TensorCore(nn.Module):
             waveform = waveform.half()
         
         B, C, T = waveform.shape
+        print(f"Processing waveform: batch_size={B}, channels={C}, length={T}")
         
         # Initialize dictionary to store all computed planes
         planes = {}
@@ -477,15 +481,19 @@ class Wav2TensorCore(nn.Module):
         if C == 1 or 'spatial' not in self.include_planes:
             # For mono audio or when spatial plane is not needed
             # Just compute a single STFT
+            print("Computing mono STFT...")
             spec = self._compute_spectral_plane_batch(waveform)
             spec_left = spec_right = spec
         else:
             # For stereo audio when spatial plane is needed
             # Compute left and right channel STFTs
+            print("Computing stereo STFT...")
             spec_left = self._compute_spectral_plane_batch(waveform[:, 0:1])
             spec_right = self._compute_spectral_plane_batch(waveform[:, 1:2])
             # Average for mono representation
             spec = (spec_left + spec_right) / 2
+        
+        print(f"Spectral plane shape: {spec.shape}")
         
         # Store spectral plane
         planes['spectral'] = spec
@@ -498,6 +506,8 @@ class Wav2TensorCore(nn.Module):
         spec_real = self._ensure_4d(spec_real)
         spec_imag = self._ensure_4d(spec_imag)
         
+        print(f"Real/Imag components shape: {spec_real.shape}")
+        
         # Add spectral components to tensor
         tensor_components.extend([spec_real, spec_imag])
         
@@ -507,24 +517,31 @@ class Wav2TensorCore(nn.Module):
         # Compute additional planes only if needed
         # Harmonic plane
         if 'harmonic' in self.include_planes:
+            print("Computing harmonic plane...")
             harmonic_plane = self._compute_harmonic_plane(spec_magnitude)
             planes['harmonic'] = harmonic_plane
             tensor_components.append(harmonic_plane)
+            print(f"Harmonic plane shape: {harmonic_plane.shape}")
         
         # Spatial plane (only for stereo input)
         if 'spatial' in self.include_planes and C > 1:
+            print("Computing spatial plane...")
             spatial_plane = self._compute_spatial_plane_optimized(spec_left, spec_right)
             planes['spatial'] = spatial_plane
             tensor_components.append(spatial_plane)
+            print(f"Spatial plane shape: {spatial_plane.shape}")
         
         # Psychoacoustic plane
         if 'psychoacoustic' in self.include_planes:
+            print("Computing psychoacoustic plane...")
             psychoacoustic_plane = self._compute_psychoacoustic_plane_optimized(spec_magnitude)
             planes['psychoacoustic'] = psychoacoustic_plane
             tensor_components.append(psychoacoustic_plane)
+            print(f"Psychoacoustic plane shape: {psychoacoustic_plane.shape}")
         
         # Stack all planes to form the tensor - single operation
         tensor = torch.cat(tensor_components, dim=1)
+        print(f"Final tensor shape: {tensor.shape}")
         
         # Convert back to original precision if needed
         if self.use_half_precision and original_dtype != torch.float16:
@@ -533,3 +550,212 @@ class Wav2TensorCore(nn.Module):
                 planes[key] = planes[key].to(dtype=original_dtype)
         
         return tensor, planes
+
+    def inverse(self, tensor: torch.Tensor, planes: Optional[dict] = None) -> torch.Tensor:
+        """
+        Convert Wav2Tensor representation back to waveform.
+        
+        Args:
+            tensor: The Wav2Tensor representation tensor
+            planes: Optional dictionary containing individual planes
+                   If not provided, will attempt to extract from tensor
+        
+        Returns:
+            Reconstructed waveform tensor
+        """
+        print(f"\nWav2TensorCore inverse: input shape = {tensor.shape}")
+        
+        # Ensure tensor is 4D [B, C, F, T]
+        tensor = self._ensure_4d(tensor)
+        print(f"After ensure_4d: shape = {tensor.shape}")
+        
+        # If planes not provided, try to extract from tensor
+        if planes is None:
+            print("Extracting planes from tensor...")
+            planes = {}
+            current_channel = 0
+            
+            # Extract spectral plane (always first two channels - real and imaginary)
+            spec_real = tensor[:, current_channel:current_channel+1]
+            spec_imag = tensor[:, current_channel+1:current_channel+2]
+            spec_real = spec_real.squeeze(1) if spec_real.shape[1] == 1 else spec_real
+            spec_imag = spec_imag.squeeze(1) if spec_imag.shape[1] == 1 else spec_imag
+            planes['spectral'] = torch.complex(spec_real, spec_imag)
+            current_channel += 2
+            print(f"Extracted spectral plane shape: {planes['spectral'].shape}")
+            
+            # Extract other planes if present
+            if 'harmonic' in self.include_planes:
+                planes['harmonic'] = tensor[:, current_channel:current_channel+1]
+                current_channel += 1
+                print(f"Extracted harmonic plane shape: {planes['harmonic'].shape}")
+            
+            if 'spatial' in self.include_planes:
+                planes['spatial'] = tensor[:, current_channel:current_channel+2]
+                current_channel += 2
+                print(f"Extracted spatial plane shape: {planes['spatial'].shape}")
+            
+            if 'psychoacoustic' in self.include_planes:
+                planes['psychoacoustic'] = tensor[:, current_channel:current_channel+1]
+                current_channel += 1
+                print(f"Extracted psychoacoustic plane shape: {planes['psychoacoustic'].shape}")
+        
+        # Get spectral plane
+        spec = planes['spectral']
+        print(f"Using spectral plane shape: {spec.shape}")
+        
+        # If using adaptive frequency, interpolate back to full resolution
+        if self.use_adaptive_freq:
+            print("Interpolating frequency resolution...")
+            # Create target frequency grid
+            n_freq_bins = self.n_fft // 2 + 1
+            
+            # Create full resolution spectrogram
+            spec_full = torch.zeros(
+                (spec.shape[0], n_freq_bins, spec.shape[-1]),
+                dtype=spec.dtype,
+                device=spec.device
+            )
+            
+            # Copy adaptive frequency bins to their corresponding positions
+            spec_full[:, self.adaptive_freq_bins_tensor, :] = spec
+            
+            # Linear interpolation for missing bins
+            for i in range(len(self.adaptive_freq_bins) - 1):
+                start_bin = self.adaptive_freq_bins[i]
+                end_bin = self.adaptive_freq_bins[i + 1]
+                if end_bin - start_bin > 1:
+                    # Linear interpolation between bins
+                    start_val = spec_full[:, start_bin:start_bin+1, :]
+                    end_val = spec_full[:, end_bin:end_bin+1, :]
+                    steps = torch.linspace(0, 1, end_bin - start_bin + 1, device=spec.device)[1:-1]
+                    for j, t in enumerate(steps, 1):
+                        spec_full[:, start_bin + j, :] = start_val * (1 - t) + end_val * t
+            
+            spec = spec_full
+            print(f"Final interpolated shape: {spec.shape}")
+        
+        # Ensure spec has shape [B, F, T]
+        if spec.dim() == 4:  # [B, 1, F, T]
+            spec = spec.squeeze(1)
+            print("Squeezed extra dimension")
+        print(f"Pre-ISTFT shape: {spec.shape}")
+        
+        # Apply inverse STFT to get mono waveform
+        waveform = torch.istft(
+            spec,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=torch.hann_window(self.n_fft, device=spec.device),
+            return_complex=False
+        )
+        print(f"Post-ISTFT shape: {waveform.shape}")
+        
+        # Add batch dimension if needed
+        if waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0)
+            print("Added batch dimension")
+        
+        # If we have spatial plane and harmonic plane, enhance the reconstruction
+        if 'spatial' in planes and 'harmonic' in planes:
+            print("Enhancing reconstruction with spatial and harmonic information...")
+            
+            # Get spatial information
+            spatial = planes['spatial']
+            ipd = spatial[:, 0:1]  # Inter-channel Phase Difference
+            energy_panning = spatial[:, 1:2]  # Energy panning
+            
+            # Get harmonic information for enhancement
+            harmonic = planes['harmonic']
+            
+            # Enhance the spectral content using harmonic information
+            spec_enhanced = spec * (1.0 + harmonic)
+            
+            # Convert to left/right channels
+            spec_left = spec_enhanced * torch.exp(1j * ipd/2)  # Add half phase difference
+            spec_right = spec_enhanced * torch.exp(-1j * ipd/2)  # Subtract half phase difference
+            
+            # Apply energy panning
+            energy_left = (1 + energy_panning) / 2
+            energy_right = (1 - energy_panning) / 2
+            
+            spec_left = spec_left * torch.sqrt(energy_left)
+            spec_right = spec_right * torch.sqrt(energy_right)
+            
+            # Convert back to waveform
+            left_wave = torch.istft(
+                spec_left,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                window=torch.hann_window(self.n_fft, device=spec.device),
+                return_complex=False
+            )
+            right_wave = torch.istft(
+                spec_right,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                window=torch.hann_window(self.n_fft, device=spec.device),
+                return_complex=False
+            )
+            
+            # Stack channels
+            waveform = torch.stack([left_wave, right_wave], dim=1)
+            print(f"Enhanced stereo waveform shape: {waveform.shape}")
+            
+            # Add batch dimension if needed
+            if waveform.dim() == 2:
+                waveform = waveform.unsqueeze(0)
+                print("Added batch dimension to stereo")
+        else:
+            # Add channel dimension for mono
+            if waveform.dim() == 2:  # [B, T]
+                waveform = waveform.unsqueeze(1)  # [B, 1, T]
+                print("Added channel dimension for mono")
+        
+        print(f"Final output shape: {waveform.shape}")
+        return waveform
+
+def run_reconstruction_test(audio_files, output_dir, sample_rate=22050, segment_duration=1.0, batch_size=4):
+    """
+    Run reconstruction test on multiple audio files with different processors.
+    
+    Args:
+        audio_files: List of audio file paths
+        output_dir: Directory to save results
+        sample_rate: Target sample rate
+        segment_duration: Duration of segment to process in seconds (default: 1.0s, 0 for full length)
+        batch_size: Number of processors to run in parallel
+        
+    Returns:
+        Dictionary with test results for all processors and files
+    """
+    print("\nStarting reconstruction test...")
+    segment_length = int(segment_duration * sample_rate) if segment_duration > 0 else None
+    print(f"Using {'full audio length' if segment_length is None else f'{segment_length} samples'}")
+    
+    # Define processors to test
+    print("\nInitializing processors...")
+    processors = {
+        'raw_waveform': IdentityProcessor(sample_rate=sample_rate),
+        'stft': STFTProcessor(
+            sample_rate=sample_rate,
+            n_fft=1024,  # Using standard FFT size
+            hop_length=256  # Using standard hop length
+        ),
+        'mel_spectrogram': MelSpectrogramProcessor(
+            sample_rate=sample_rate,
+            n_fft=1024,  # Using standard FFT size
+            hop_length=256,  # Using standard hop length
+            n_mels=80
+        ),
+        'wav2tensor': Wav2TensorProcessor(
+            sample_rate=sample_rate,
+            n_fft=1024,  # Using standard FFT size
+            hop_length=256,  # Using standard hop length
+            harmonic_method='hps',
+            include_planes=['spectral', 'harmonic', 'spatial', 'psychoacoustic'],  # Using all planes
+            use_adaptive_freq=False,  # Disable adaptive frequency for now
+            target_freq_bins=None
+        )
+    }
+    print("Processors initialized.")

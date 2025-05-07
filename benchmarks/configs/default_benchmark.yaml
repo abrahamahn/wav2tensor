@@ -4,8 +4,6 @@ n_fft: 1024
 hop_length: 256
 n_mels: 80
 harmonic_method: hps
-bit_depth: 16
-fusion_method: concat
 use_adaptive_freq: false
 target_freq_bins: 256
 include_planes:

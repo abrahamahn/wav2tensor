@@ -16,35 +16,31 @@ Our implementation creates a structured tensor T ∈ ℂ^(F×T'×D) with four in
 3. **Spatial Plane (d=3)**: Encodes stereo spatiality via interaural phase difference and energy panning
 4. **Psychoacoustic Plane (d=4)**: Estimates perceptual masking thresholds
 
-## New: Wav2TensorLite with Early Fusion
+## Optimization Options
 
-We now provide **Wav2TensorLite**, an optimized version that uses early fusion architecture:
+Wav2Tensor offers several optimization options for balancing quality, speed, and memory usage:
 
-```
-                                 ┌───────────────────┐
-Spectral Plane ──────────────► ┌─┤                   │
-                               │ │                   │
-Harmonic Plane ───────────────►│ │    Early Fusion   │─────► Encoder ─────► Decoder ─────► Output
-                               │ │      Network      │
-Spatial Plane ─────────────────┘ │                   │
-                                 └───────────────────┘
-```
+### 1. Selective Plane Configuration
 
-### Key Features of Wav2TensorLite:
+Choose which planes to include based on your application needs:
+- **Full**: All planes for maximum representation quality
+- **Balanced**: Spectral and harmonic planes for music and general audio
+- **Minimal**: Only spectral plane for fastest processing
+- **Spatial Focus**: Spectral and spatial planes for stereo processing
 
-1. **Early Fusion**: Combines planes early in the process rather than processing independently
-2. **Log-compressed 8/16-bit representation**: Dramatically reduces memory footprint
-3. **Frequency-adaptive resolution**: Higher resolution in bass region where it matters most
-4. **Configurable fusion methods**:
-   - `concat`: Simple concatenation of plane channels
-   - `add`: Weighted addition of planes
-   - `learned`: Neural network learns optimal fusion weights
+### 2. Adaptive Frequency Resolution
 
-### Performance Improvements:
+Reduce memory footprint by using a frequency-adaptive resolution that allocates more bins to perceptually important regions:
+- Higher resolution in bass region where it matters most
+- Significant memory reduction (up to 90%) with minimal perceptual impact
 
-- **Memory reduction**: Up to 70% smaller representation
-- **Computation speedup**: 1.5-2x faster processing 
-- **Comparable quality**: Maintains most of the benefits while reducing computational overhead
+### 3. Configurable Hop Length
+
+Adjust time resolution to balance detail and efficiency:
+- Smaller hop length (e.g., 256): More temporal detail
+- Larger hop length (e.g., 512): ~50% memory reduction, faster processing
+
+Our benchmarks show these optimizations can reduce memory usage by up to 92% with moderate quality impact.
 
 ## Installation
 
@@ -92,49 +88,62 @@ spatial_plane = planes['spatial']        # Spatial cues
 psychoacoustic_plane = planes['psychoacoustic']  # Masking threshold
 ```
 
-### Using Wav2TensorLite
+### Optimized Usage
 
 ```python
 import torch
-from wav2tensor.core_lite import Wav2TensorLite
+from wav2tensor import Wav2TensorCore
 
 # Create an audio tensor
 waveform = torch.randn(1, 2, 22050)  # 1 second of stereo audio
 
-# Initialize Wav2TensorLite with desired configuration
-wav2tensor_lite = Wav2TensorLite(
+# Initialize Wav2Tensor with optimized configuration
+wav2tensor_optimized = Wav2TensorCore(
     sample_rate=22050,
     n_fft=1024,
-    hop_length=256,
-    bit_depth=16,                            # 8 or 16 bit quantization
-    use_adaptive_freq=True,                  # Higher resolution in bass region
-    harmonic_method='hps',                   # or 'filterbank'
-    include_planes=['spectral', 'harmonic'], # Planes to include
-    fusion_method='concat'                   # or 'add', 'learned'
+    hop_length=512,                             # Increased hop length for efficiency
+    use_adaptive_freq=True,                     # Higher resolution in bass region
+    target_freq_bins=128,                       # Reduced frequency bins
+    include_planes=['spectral', 'harmonic'],    # Only essential planes
+    harmonic_method='hps',                      # Faster harmonic method
+    use_half_precision=True                     # Use float16 for more efficiency
 )
 
 # Convert to optimized representation
-tensor, metadata = wav2tensor_lite(waveform)
-
-# Access metadata for quantization parameters and shape information
-print(metadata['quant_params'])
-print(metadata['tensor_shape'])
+tensor, planes = wav2tensor_optimized(waveform)
 ```
 
 ### Comparing Representations
 
-Run the comparison script to see the difference between original and lite versions:
+Run the benchmark scripts to compare different configurations:
 
 ```bash
-python analyze_wav2tensor_lite.py path/to/your/audio.wav --bit-depth 16 --fusion concat
+python benchmarks/run_benchmark.py path/to/your/audio.wav --planes minimal --adaptive --target_freq_bins 128
 ```
 
 Options:
-- `--bit-depth`: 8 or 16 (default: 16)
-- `--fusion`: concat, add, or learned (default: concat)
-- `--method`: hps or filterbank (default: hps)
-- `--no-adaptive`: Disable adaptive frequency resolution
-- `--planes`: Comma-separated list of planes or "default", "all", "minimal"
+- `--planes`: 'default', 'all', 'minimal', or comma-separated list
+- `--method`: 'hps' or 'filterbank' (default: 'hps')
+- `--adaptive`: Enable adaptive frequency resolution
+- `--target_freq_bins`: Number of frequency bins with adaptive resolution
+- `--hop_length`: Hop length for STFT (default: 256)
+
+### Model-based Comparison
+
+To evaluate the performance of Wav2Tensor in actual models:
+
+```bash
+python examples/model_comparison.py
+```
+
+This script:
+1. Creates a synthetic dataset for audio enhancement
+2. Trains a U-Net model using different audio representations:
+   - Raw waveform
+   - Mel-spectrogram
+   - Wav2Tensor (various configurations)
+3. Evaluates performance using PESQ and STOI metrics
+4. Generates comparison plots
 
 ### Example Scripts
 
@@ -150,93 +159,28 @@ Or run with your own audio file:
 python -m examples.basic_usage path/to/your/audio.wav
 ```
 
-### Testing the Model
+### Benchmark Results
 
-Run the evaluation script to compare Wav2Tensor against spectrogram-based baselines:
+Our benchmark results show the performance characteristics of different representations:
 
-```bash
-python -m examples.evaluation
-```
+| Method          | Processing Time | Memory Usage | Output Shape      |
+|-----------------|----------------:|-------------:|-------------------|
+| Waveform        |     0.000095s   |    516.80 KB | [1, 2, 66150]     |
+| Mel-Spectrogram |     0.000865s   |    161.88 KB | [1, 2, 1, 80, 259]|
+| Wav2Tensor (Full)|     0.003455s   |   2076.05 KB | [1, 4, 513, 259]  |
+| Wav2Tensor (Minimal)|     0.000570s   |    225.47 KB | [1, 4, 111, 130]  |
 
-This script:
-1. Generates synthetic clean + degraded audio pairs
-2. Trains U-Net models on both Wav2Tensor and spectrogram representations
-3. Evaluates using PESQ and STOI metrics
-4. Generates comparison visualizations
+For more detailed benchmark results and optimization recommendations, see [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
-### Running the Test Suite
+## Performance Metrics [Planned]
 
-The project includes a comprehensive test suite to ensure reliable functionality:
+While our benchmarks have measured computational efficiency, we are still validating the performance claims for downstream tasks. The `examples/model_comparison.py` script will evaluate Wav2Tensor against baselines using these metrics:
 
-```bash
-# Run all tests with coverage report
-python run_tests.py -v
+- **PESQ**: Perceptual Evaluation of Speech Quality
+- **STOI**: Short-Time Objective Intelligibility
+- **SDR**: Signal-to-Distortion Ratio
 
-# Run specific test categories
-python run_tests.py tests/unit/ -v
-python run_tests.py tests/integration/ -v
-python run_tests.py tests/performance/ -v
-
-# Run specific test file
-python run_tests.py tests/unit/test_core.py -v
-```
-
-The test suite is organized into categories:
-- **Unit tests**: Testing individual components in isolation
-- **Integration tests**: Verifying components work together properly
-- **Performance tests**: Measuring computational efficiency and memory usage
-- **Analysis tools**: Scripts for in-depth analysis of specific features
-
-For more details about running tests, see the [tests/README.md](tests/README.md) file.
-
-## Model Architecture
-
-Wav2Tensor consists of four primary components:
-
-1. **Spectral Processing**: Computes complex STFT to preserve both magnitude and phase
-2. **Harmonic Analysis**: Implements either:
-   - **Harmonic Product Spectrum (HPS)**: Traditional approach that enhances pitch structure through harmonic multiplication
-   - **Learned Harmonic Filterbanks**: Trainable CNN approach for adaptive harmonic detection
-3. **Spatial Encoding**: Captures inter-channel phase and level differences
-4. **Psychoacoustic Modeling**: Estimates masking thresholds based on perceptual principles
-
-## Implementation Notes
-
-### Harmonic Plane
-
-The harmonic plane has two implementation options:
-
-#### 1. Harmonic Product Spectrum (HPS)
-- Traditional HPS directly multiplies spectral magnitudes at harmonic frequencies
-- Our implementation performs multiplication in the log-domain (using addition of logarithms), improving numerical stability
-- This approach provides more robust detection of harmonic content across different types of audio material
-- We use `torch.log1p` and `torch.expm1` for improved stability with small values
-- K=3 harmonics are used (reduced from original K=5) to focus on stronger harmonics
-- Nearest-neighbor interpolation preserves peak values during frequency scaling
-
-#### 2. Learned Harmonic Filterbanks
-- Replaces HPS with 1D convolutions to learn task-specific harmonic patterns
-- Advantages:
-  - Adaptive to data characteristics
-  - Produces stable gradients during training
-  - Can learn more complex harmonic relationships
-- Implementation uses a sequence of 2D convolutional layers operating on the frequency dimension
-- Initialized to approximate HPS behavior but can adapt during training
-
-### Psychoacoustic Plane
-
-The psychoacoustic plane models masking thresholds using perceptual audio principles:
-- Frequency bins are converted to Bark scale to better model human auditory perception
-- An asymmetric spreading function is applied that's wider at lower frequencies (matching human hearing)
-- A masking threshold offset is applied to simulate the audibility threshold
-- This implementation better captures which audio components would mask others in human perception
-
-## Results
-
-Downstream models conditioned on Wav2Tensor achieve superior objective metrics compared to spectrogram-based baselines:
-- PESQ: 3.72 vs 3.12 (spectrogram)
-- STOI: 0.91 vs 0.82 (spectrogram)
-- Training convergence time reduced by 37%
+Initial experiments with Wav2Tensor suggest promising improvements in these metrics, but comprehensive validation is still in progress. Results will be updated here as they become available.
 
 ## Project Structure
 
@@ -244,13 +188,19 @@ Downstream models conditioned on Wav2Tensor achieve superior objective metrics c
 wav2tensor/
 ├── wav2tensor/         # Main package
 │   ├── __init__.py     # Package exports
-│   ├── core.py         # Core implementation
-│   └── core_lite.py    # Optimized lite implementation
+│   └── core.py         # Core implementation
 ├── examples/           # Example scripts
 │   ├── basic_usage.py  # Basic usage demonstration
+│   ├── model_comparison.py # Compare representations in models
 │   └── evaluation.py   # Evaluation against baselines
-├── analyze_wav2tensor_lite.py # Compare original vs lite versions
-├── wav2tensor_analysis.py     # Analysis script for original version
+├── benchmarks/         # Benchmarking tools
+│   ├── processors/     # Audio representation processors
+│   ├── configs/        # Configuration files
+│   ├── runners/        # Benchmark runners
+│   ├── visualizers/    # Results visualization 
+│   ├── run_benchmark.py # Main benchmark script
+│   ├── run_from_config.py # Config-based benchmark
+│   └── RESULTS.md      # Benchmark result details
 ├── tests/              # Test suite
 │   ├── unit/           # Unit tests for individual components
 │   │   ├── planes/     # Tests for individual planes

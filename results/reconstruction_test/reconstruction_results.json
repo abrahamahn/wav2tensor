@@ -1,0 +1,31 @@
+{
+  "song1": {
+    "raw_waveform": {
+      "mse": 0.0,
+      "snr": 100.0,
+      "lsd": 0.0,
+      "sample_rate": 22050,
+      "n_channels": 2
+    },
+    "stft": {
+      "mse": 5.3764807522035875e-16,
+      "snr": 138.18927001953125,
+      "lsd": 0.0013555692275986075,
+      "sample_rate": 22050,
+      "n_channels": 2
+    },
+    "mel_spectrogram": {
+      "mse": 0.07373076677322388,
+      "snr": -3.17848801612854,
+      "lsd": 0.4469066262245178,
+      "sample_rate": 22050,
+      "n_channels": 2
+    },
+    "wav2tensor": {
+      "mse": 1.0,
+      "snr": -20.0,
+      "lsd": 10.0,
+      "error": "The size of tensor a (513) must match the size of tensor b (306) at non-singleton dimension 2"
+    }
+  }
+}

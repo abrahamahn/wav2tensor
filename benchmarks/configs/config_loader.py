@@ -17,8 +17,6 @@ DEFAULT_CONFIG = {
     'hop_length': 256,
     'n_mels': 80,
     'harmonic_method': 'hps',
-    'bit_depth': 16,
-    'fusion_method': 'concat',
     'use_adaptive_freq': False,
     'target_freq_bins': 256,
     'include_planes': ['spectral', 'harmonic', 'spatial', 'psychoacoustic'],
@@ -101,14 +99,6 @@ def _validate_config(config: Dict[str, Any]):
     # Valid harmonic methods
     if 'harmonic_method' in config and config['harmonic_method'] not in ['hps', 'filterbank']:
         raise ValueError("harmonic_method must be 'hps' or 'filterbank'")
-    
-    # Valid fusion methods
-    if 'fusion_method' in config and config['fusion_method'] not in ['concat', 'add', 'learned']:
-        raise ValueError("fusion_method must be 'concat', 'add', or 'learned'")
-    
-    # Valid bit depth
-    if 'bit_depth' in config and config['bit_depth'] not in [8, 16]:
-        raise ValueError("bit_depth must be 8 or 16")
     
     # Valid planes
     valid_planes = ['spectral', 'harmonic', 'spatial', 'psychoacoustic']
