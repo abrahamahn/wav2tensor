@@ -14,7 +14,7 @@ setup(
     description="Structured Multi-Plane Audio Representation for Enhanced Generative Modeling",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/wav2tensor",
+    url="https://github.com/abrahamahn/wav2tensor",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -25,4 +25,4 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=requirements,
-) 
+)

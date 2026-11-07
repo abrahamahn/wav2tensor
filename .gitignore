@@ -24,7 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
+# PyInstalle
 *.manifest
 *.spec
 
@@ -40,7 +40,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
-*.cover
+*.cove
 .hypothesis/
 .pytest_cache/
 
@@ -54,6 +54,7 @@ coverage.xml
 *.swo
 
 # Environment directories
+.venv/
 env/
 venv/
 ENV/
