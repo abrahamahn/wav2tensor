@@ -75,11 +75,11 @@ class Wav2TensorUpsampler(nn.Module):
         x = F.leaky_relu(x, 0.4)
         
         # Adjust frequency dimension
-        B, C, F, T = x.shape
+        batch_size, channels, freq_bins, time_steps = x.shape
         x = x.transpose(2, 3)  # [B, C, T, F]
-        x = x.reshape(B * C * T, F, 1)  # Prepare for 1D conv
+        x = x.reshape(batch_size * channels * time_steps, freq_bins, 1)  # Prepare for 1D conv
         x = self.freq_conv(x)
-        x = x.view(B, C, T, -1).transpose(2, 3)  # Back to [B, C, F, T]
+        x = x.view(batch_size, channels, time_steps, -1).transpose(2, 3)  # Back to [B, C, F, T]
         
         # Project to single channel
         x = self.output_proj(x.transpose(1, 2)).transpose(1, 2)  # [B, 1, F, T]
